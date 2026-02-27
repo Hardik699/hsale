@@ -777,6 +777,10 @@ export default function ItemDetail() {
                     monthlyData={salesData.monthlyData}
                     dateWiseData={salesData.dateWiseData}
                     restaurantSales={salesData.restaurantSales}
+                    zomatoData={salesData.zomatoData}
+                    swiggyData={salesData.swiggyData}
+                    diningData={salesData.diningData}
+                    parcelData={salesData.parcelData}
                   />
 
                 </div>
