@@ -54,6 +54,7 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 
 export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {}, unitType = "units" }: SalesChartsProps) {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [hoveredRestaurant, setHoveredRestaurant] = useState<string | null>(null);
 
   // Custom tooltip to show both quantity and value with variations
   const CustomMonthlyTooltip = ({ active, payload }: any) => {
@@ -352,18 +353,30 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             const topRestaurant = sortedRestaurants[0];
             const topRestaurantPercentage = totalSales > 0 ? ((topRestaurant[1] as number) / totalSales) * 100 : 0;
 
+            const hoveredRestaurantData = hoveredRestaurant
+              ? sortedRestaurants.find(([name]) => name === hoveredRestaurant)
+              : topRestaurant;
+
+            const hoveredPercentage = hoveredRestaurantData
+              ? totalSales > 0 ? ((hoveredRestaurantData[1] as number) / totalSales) * 100 : 0
+              : topRestaurantPercentage;
+
             return (
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
                 {/* Donut Chart with Center Info */}
                 <div className="lg:col-span-2 flex flex-col items-center justify-center">
-                  <div className="relative w-80 h-80 drop-shadow-2xl">
+                  <div className="relative w-80 h-80">
+                    {/* Glow effect background */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/20 to-transparent rounded-full blur-3xl -z-10 animate-pulse"></div>
+
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={sortedRestaurants.map(([name, value], idx) => ({
                             name,
                             value: value as number,
-                            fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
+                            fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length],
+                            isHovered: name === hoveredRestaurant
                           }))}
                           cx="50%"
                           cy="50%"
@@ -372,14 +385,23 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                           paddingAngle={2.5}
                           dataKey="value"
                           animationDuration={600}
+                          animationEasing="ease-out"
                         >
-                          {sortedRestaurants.map((_, idx) => (
-                            <Cell
-                              key={`cell-${idx}`}
-                              fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
-                              opacity={0.95}
-                            />
-                          ))}
+                          {sortedRestaurants.map((_, idx) => {
+                            const isHovered = sortedRestaurants[idx][0] === hoveredRestaurant;
+                            return (
+                              <Cell
+                                key={`cell-${idx}`}
+                                fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
+                                opacity={hoveredRestaurant ? (isHovered ? 1 : 0.4) : 0.95}
+                                style={{
+                                  filter: isHovered ? `drop-shadow(0 0 12px ${RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]})` : 'none',
+                                  transition: 'opacity 300ms ease, filter 300ms ease',
+                                  cursor: 'pointer'
+                                }}
+                              />
+                            );
+                          })}
                         </Pie>
                         <Tooltip
                           contentStyle={{
@@ -395,14 +417,19 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                       </PieChart>
                     </ResponsiveContainer>
 
-                    {/* Center Content */}
+                    {/* Center Content with Smooth Transition */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <div className="text-center">
-                        <div className="text-5xl font-black text-white">
-                          {topRestaurantPercentage.toFixed(1)}%
+                      <div className="text-center transition-all duration-300">
+                        <div className="text-5xl font-black text-white mb-1">
+                          {hoveredPercentage.toFixed(1)}%
                         </div>
-                        <div className="text-sm font-semibold text-gray-300 mt-3 px-4">
-                          {topRestaurant[0]}
+                        <div className="text-sm font-semibold text-gray-300 px-4 h-6 overflow-hidden">
+                          <div
+                            className="transition-all duration-300"
+                            key={hoveredRestaurant || 'default'}
+                          >
+                            {hoveredRestaurantData?.[0]}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -415,29 +442,55 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                     {sortedRestaurants.map(([restaurant, sales], idx) => {
                       const percentage = totalSales > 0 ? ((sales as number) / totalSales) * 100 : 0;
                       const color = RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length];
+                      const isHovered = hoveredRestaurant === restaurant;
 
                       return (
                         <div
                           key={restaurant}
-                          className="group flex items-center justify-between p-5 bg-gradient-to-r from-emerald-950/40 to-gray-900/20 rounded-xl hover:from-emerald-900/50 hover:to-gray-900/30 transition-all duration-300 border border-emerald-900/40 hover:border-emerald-700/60 backdrop-blur-sm"
+                          onMouseEnter={() => setHoveredRestaurant(restaurant)}
+                          onMouseLeave={() => setHoveredRestaurant(null)}
+                          className={`group flex items-center justify-between p-5 rounded-xl transition-all duration-300 border backdrop-blur-sm cursor-pointer ${
+                            isHovered
+                              ? 'bg-gradient-to-r from-emerald-900/70 to-emerald-800/40 border-emerald-500/80 shadow-lg shadow-emerald-500/30'
+                              : 'bg-gradient-to-r from-emerald-950/40 to-gray-900/20 border-emerald-900/40 hover:from-emerald-900/50 hover:to-gray-900/30 hover:border-emerald-700/60'
+                          }`}
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
                             <div
-                              className="w-5 h-5 rounded-full flex-shrink-0 shadow-xl ring-2 ring-emerald-400/30 group-hover:ring-emerald-400/60 transition-all"
-                              style={{ backgroundColor: color }}
+                              className={`w-5 h-5 rounded-full flex-shrink-0 shadow-xl ring-2 transition-all duration-300 ${
+                                isHovered
+                                  ? 'ring-emerald-300/80 scale-110 shadow-lg'
+                                  : 'ring-emerald-400/30 group-hover:ring-emerald-400/60'
+                              }`}
+                              style={{
+                                backgroundColor: color,
+                                filter: isHovered ? `drop-shadow(0 0 8px ${color})` : 'none'
+                              }}
                             ></div>
                             <div className="flex-1 min-w-0">
-                              <span className="text-sm font-bold text-gray-50 block truncate group-hover:text-emerald-100 transition-colors">
+                              <span className={`text-sm font-bold block truncate transition-colors duration-300 ${
+                                isHovered
+                                  ? 'text-emerald-100'
+                                  : 'text-gray-50 group-hover:text-emerald-100'
+                              }`}>
                                 {restaurant}
                               </span>
-                              <span className="text-xs text-gray-500 group-hover:text-emerald-400/70 transition-colors">
+                              <span className={`text-xs transition-colors duration-300 ${
+                                isHovered
+                                  ? 'text-emerald-400'
+                                  : 'text-gray-500 group-hover:text-emerald-400/70'
+                              }`}>
                                 Sales Distribution
                               </span>
                             </div>
                           </div>
                           <div className="flex items-center gap-6 ml-4">
                             <div className="text-right">
-                              <div className="text-sm font-semibold text-gray-300 group-hover:text-emerald-100 transition-colors">
+                              <div className={`text-sm font-semibold transition-colors duration-300 ${
+                                isHovered
+                                  ? 'text-emerald-100'
+                                  : 'text-gray-300 group-hover:text-emerald-100'
+                              }`}>
                                 {sales.toLocaleString()}
                               </div>
                               <div className="text-xs text-gray-500">
@@ -445,7 +498,11 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                               </div>
                             </div>
                             <div className="text-right">
-                              <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-green-400">
+                              <div className={`text-2xl font-black transition-all duration-300 ${
+                                isHovered
+                                  ? 'text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 to-green-300 scale-110'
+                                  : 'text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-green-400'
+                              }`}>
                                 {percentage.toFixed(1)}%
                               </div>
                             </div>
