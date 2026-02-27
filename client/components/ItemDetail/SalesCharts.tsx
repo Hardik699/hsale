@@ -38,9 +38,9 @@ interface SalesChartsProps {
 }
 
 const RESTAURANT_COLORS = [
-  "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef",
-  "#ec4899", "#f43f5e", "#ef4444", "#f97316", "#eab308", "#84cc16",
-  "#22c55e", "#10b981", "#14b8a6"
+  "#22c55e", "#16a34a", "#84cc16", "#65a30d", "#4ade80", "#86efac",
+  "#bbf7d0", "#dcfce7", "#10b981", "#059669", "#14b8a6", "#0d9488",
+  "#06b6d4", "#0891b2", "#0e7490"
 ];
 
 const AREA_COLORS = {
@@ -334,10 +334,10 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
 
       {/* Restaurant Comparison Chart - Donut */}
       {restaurantSales && Object.keys(restaurantSales).length > 0 && (
-        <div className="bg-gradient-to-br from-gray-950 via-slate-900 to-gray-950 rounded-2xl border border-gradient-to-r from-blue-500/20 via-purple-500/10 to-blue-500/20 p-8 backdrop-blur-sm shadow-xl shadow-blue-500/5">
+        <div className="bg-gradient-to-br from-slate-900 via-gray-950 to-slate-900 rounded-2xl border border-emerald-500/20 p-8 backdrop-blur-sm shadow-xl shadow-emerald-500/10">
           <div className="flex items-center gap-3 mb-10">
-            <div className="p-3 bg-gradient-to-br from-blue-500/30 to-purple-500/20 rounded-xl border border-blue-400/30">
-              <BarChart3 className="w-5 h-5 text-blue-300" />
+            <div className="p-3 bg-gradient-to-br from-emerald-500/30 to-green-500/20 rounded-xl border border-emerald-400/30">
+              <BarChart3 className="w-5 h-5 text-emerald-300" />
             </div>
             <div>
               <h2 className="text-3xl font-black text-white tracking-tight">Restaurant Performance</h2>
@@ -369,8 +369,9 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                           cy="50%"
                           innerRadius={85}
                           outerRadius={135}
-                          paddingAngle={2}
+                          paddingAngle={2.5}
                           dataKey="value"
+                          animationDuration={600}
                         >
                           {sortedRestaurants.map((_, idx) => (
                             <Cell
@@ -383,10 +384,10 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                         <Tooltip
                           contentStyle={{
                             backgroundColor: "#111827",
-                            border: "2px solid #1f2937",
+                            border: "2px solid #22c55e",
                             borderRadius: "12px",
                             padding: "12px 16px",
-                            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3)"
+                            boxShadow: "0 20px 25px -5px rgba(34, 197, 94, 0.2)"
                           }}
                           formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
                           labelStyle={{ color: "#fff", fontWeight: "bold" }}
@@ -397,10 +398,10 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                     {/* Center Content */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <div className="text-center">
-                        <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                        <div className="text-5xl font-black text-white">
                           {topRestaurantPercentage.toFixed(1)}%
                         </div>
-                        <div className="text-sm font-bold text-gray-300 mt-3 px-4">
+                        <div className="text-sm font-semibold text-gray-300 mt-3 px-4">
                           {topRestaurant[0]}
                         </div>
                       </div>
@@ -418,25 +419,25 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                       return (
                         <div
                           key={restaurant}
-                          className="group flex items-center justify-between p-5 bg-gradient-to-r from-gray-900/60 to-gray-900/30 rounded-xl hover:from-gray-800/80 hover:to-gray-800/40 transition-all duration-300 border border-gray-700/40 hover:border-gray-600/60 backdrop-blur-sm"
+                          className="group flex items-center justify-between p-5 bg-gradient-to-r from-emerald-950/40 to-gray-900/20 rounded-xl hover:from-emerald-900/50 hover:to-gray-900/30 transition-all duration-300 border border-emerald-900/40 hover:border-emerald-700/60 backdrop-blur-sm"
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
                             <div
-                              className="w-5 h-5 rounded-full flex-shrink-0 shadow-xl ring-2 ring-white/20 group-hover:ring-white/40 transition-all"
+                              className="w-5 h-5 rounded-full flex-shrink-0 shadow-xl ring-2 ring-emerald-400/30 group-hover:ring-emerald-400/60 transition-all"
                               style={{ backgroundColor: color }}
                             ></div>
                             <div className="flex-1 min-w-0">
-                              <span className="text-sm font-bold text-gray-50 block truncate group-hover:text-white transition-colors">
+                              <span className="text-sm font-bold text-gray-50 block truncate group-hover:text-emerald-100 transition-colors">
                                 {restaurant}
                               </span>
-                              <span className="text-xs text-gray-500 group-hover:text-gray-400 transition-colors">
+                              <span className="text-xs text-gray-500 group-hover:text-emerald-400/70 transition-colors">
                                 Sales Distribution
                               </span>
                             </div>
                           </div>
                           <div className="flex items-center gap-6 ml-4">
                             <div className="text-right">
-                              <div className="text-sm font-semibold text-gray-300 group-hover:text-gray-100 transition-colors">
+                              <div className="text-sm font-semibold text-gray-300 group-hover:text-emerald-100 transition-colors">
                                 {sales.toLocaleString()}
                               </div>
                               <div className="text-xs text-gray-500">
@@ -444,7 +445,7 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                               </div>
                             </div>
                             <div className="text-right">
-                              <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                              <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-green-400">
                                 {percentage.toFixed(1)}%
                               </div>
                             </div>
