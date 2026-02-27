@@ -769,6 +769,7 @@ export default function ItemDetail() {
                     diningData={salesData.diningData}
                     parcelData={salesData.parcelData}
                     saleType={item?.variations?.[0]?.saleType || "QTY"}
+                    unitType={item?.unitType || "units"}
                   />
 
                   <div className="h-px bg-gray-800"></div>
