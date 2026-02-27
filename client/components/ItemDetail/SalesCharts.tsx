@@ -90,17 +90,18 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
   return (
     <div className="space-y-6">
       {/* Monthly Sales Quantity Chart - All 12 Months with Stacked Bars */}
-      <div className="bg-gradient-to-r from-orange-900/40 to-orange-800/30 rounded-xl p-6 border border-orange-700/50 backdrop-blur-sm">
-        <div className="flex items-center gap-2 mb-4">
-          <div className="p-2 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg">
-            <BarChart3 className="w-5 h-5 text-white" />
+      <div className="bg-gray-950/95 rounded-2xl p-8 border border-gray-800/50 backdrop-blur-sm">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2.5 bg-yellow-500/20 rounded-lg">
+            <BarChart3 className="w-5 h-5 text-yellow-400" />
           </div>
-          <h2 className="text-2xl font-bold text-white">Monthly Sales Quantity</h2>
+          <div>
+            <h2 className="text-2xl font-black text-white tracking-tight">Monthly Sales Quantity</h2>
+            <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-widest font-semibold">Area-wise sales across all 12 months</p>
+          </div>
         </div>
 
-        <p className="text-sm text-gray-300 mb-4">Area-wise sales across all 12 months</p>
-
-        <div className="w-full h-96 bg-gray-900/30 rounded-lg p-4 border border-gray-800">
+        <div className="w-full h-96 bg-slate-900/50 rounded-xl p-6 border border-gray-800/30">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={allMonthsData}
@@ -108,31 +109,32 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             >
               <defs>
                 <linearGradient id="dailySalesGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.9} />
-                  <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.7} />
+                  <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.95} />
+                  <stop offset="100%" stopColor="#eab308" stopOpacity={0.75} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={true} />
+              <CartesianGrid strokeDasharray="4 4" stroke="#4b5563" vertical={true} opacity={0.3} />
               <XAxis
                 dataKey="month"
-                stroke="#9ca3af"
-                tick={{ fill: "#d1d5db", fontSize: 12, fontWeight: 500 }}
+                stroke="#6b7280"
+                tick={{ fill: "#9ca3af", fontSize: 11, fontWeight: 500 }}
                 angle={-45}
                 textAnchor="end"
                 height={80}
               />
               <YAxis
-                stroke="#9ca3af"
-                tick={{ fill: "#d1d5db", fontSize: 12 }}
-                label={{ value: 'Qty', angle: -90, position: 'insideLeft', style: { fill: '#d1d5db' } }}
+                stroke="#6b7280"
+                tick={{ fill: "#9ca3af", fontSize: 11 }}
+                label={{ value: 'Qty', angle: -90, position: 'insideLeft', offset: 5, style: { fill: '#9ca3af', fontSize: 11 } }}
               />
               <Tooltip
                 content={<CustomMonthlyTooltip />}
-                cursor={{ fill: "rgba(59, 130, 246, 0.1)" }}
+                cursor={{ fill: "rgba(168, 85, 247, 0.08)" }}
               />
               <Legend
-                wrapperStyle={{ paddingTop: "20px", fontSize: 13 }}
-                iconType="square"
+                wrapperStyle={{ paddingTop: "24px", fontSize: 12 }}
+                iconType="circle"
+                verticalAlign="top"
               />
               <Bar
                 dataKey="totalQty"
@@ -146,10 +148,10 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                 type="monotone"
                 dataKey="zomatoQty"
                 stroke="#a855f7"
-                strokeWidth={3}
+                strokeWidth={2.5}
                 name="Zomato Trend"
-                dot={{ fill: "#a855f7", r: 5 }}
-                activeDot={{ r: 7 }}
+                dot={{ fill: "#a855f7", r: 4.5, strokeWidth: 2, stroke: "#1f2937" }}
+                activeDot={{ r: 6.5 }}
                 isAnimationActive={true}
                 animationDuration={600}
               />
@@ -160,33 +162,32 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
 
       {/* Date-wise Daily Sales Chart */}
       {dateWiseData && dateWiseData.length > 0 && filteredDateWiseData && filteredDateWiseData.length > 0 && (
-        <div className="bg-gradient-to-br from-white via-orange-50/30 to-orange-50 rounded-2xl border border-orange-200/60 p-8 shadow-lg hover:shadow-xl transition">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4">
+        <div className="bg-gray-950/95 rounded-2xl border border-gray-800/50 p-8 backdrop-blur-sm">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-gradient-to-br from-orange-500 via-orange-600 to-orange-700 rounded-xl shadow-lg">
-                <TrendingUp className="w-6 h-6 text-white" />
+              <div className="p-2.5 bg-yellow-500/20 rounded-lg">
+                <TrendingUp className="w-5 h-5 text-yellow-400" />
               </div>
               <div>
-                <h2 className="text-3xl font-bold text-gray-900">
+                <h2 className="text-2xl font-black text-white tracking-tight">
                   Daily Sales Breakdown
                 </h2>
                 {selectedMonth && (
-                  <p className="text-sm text-orange-600 font-semibold mt-1">📅 Filtered by {selectedMonth}</p>
+                  <p className="text-xs text-yellow-500/80 font-semibold mt-1 uppercase tracking-widest">📅 Filtered by {selectedMonth}</p>
                 )}
               </div>
             </div>
             {selectedMonth && (
               <button
                 onClick={() => setSelectedMonth(null)}
-                className="px-5 py-2.5 bg-white hover:bg-orange-50 text-orange-700 rounded-lg border border-orange-300 text-sm font-bold transition shadow-md hover:shadow-lg hover:border-orange-400"
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700 text-xs font-bold transition hover:border-gray-600"
               >
                 ✕ Clear Filter
               </button>
             )}
           </div>
-          <p className="text-sm font-medium text-gray-600 mb-6">Daily area-wise sales for {selectedMonth || 'selected period'}</p>
 
-          <div className="w-full bg-white rounded-xl p-6 border border-gray-100 shadow-lg">
+          <div className="w-full bg-slate-900/50 rounded-xl p-6 border border-gray-800/30">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={filteredDateWiseData}
@@ -210,26 +211,26 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                     <stop offset="100%" stopColor="#10b981" stopOpacity={0.6} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={true} />
+                <CartesianGrid strokeDasharray="4 4" stroke="#4b5563" vertical={true} opacity={0.3} />
                 <XAxis
                   dataKey="date"
                   stroke="#6b7280"
-                  tick={{ fill: "#374151", fontSize: 11, fontWeight: 500 }}
+                  tick={{ fill: "#9ca3af", fontSize: 10, fontWeight: 500 }}
                   angle={-45}
                   textAnchor="end"
                   height={100}
                 />
                 <YAxis
                   stroke="#6b7280"
-                  tick={{ fill: "#374151", fontSize: 12 }}
-                  label={{ value: 'Quantity', angle: -90, position: 'insideLeft', style: { fill: '#374151' } }}
+                  tick={{ fill: "#9ca3af", fontSize: 11 }}
+                  label={{ value: 'Qty', angle: -90, position: 'insideLeft', offset: 5, style: { fill: '#9ca3af', fontSize: 11 } }}
                 />
                 <Tooltip
                   content={<CustomMonthlyTooltip />}
                   cursor={{ fill: "rgba(34, 197, 94, 0.1)" }}
                 />
                 <Legend
-                  wrapperStyle={{ paddingTop: "20px", fontSize: 13 }}
+                  wrapperStyle={{ paddingTop: "24px", fontSize: 12 }}
                   iconType="square"
                 />
                 <Bar
@@ -268,25 +269,6 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             </ResponsiveContainer>
           </div>
 
-          {/* Legend Section */}
-          <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-gradient-to-r from-orange-50 to-orange-100/50 rounded-lg border border-orange-200/50">
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-white border border-orange-100 hover:border-orange-300 transition">
-              <div className="w-3.5 h-3.5 rounded" style={{ backgroundColor: "#ef4444" }}></div>
-              <span className="text-xs font-semibold text-gray-700">Zomato</span>
-            </div>
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-white border border-orange-100 hover:border-orange-300 transition">
-              <div className="w-3.5 h-3.5 rounded" style={{ backgroundColor: "#f97316" }}></div>
-              <span className="text-xs font-semibold text-gray-700">Swiggy</span>
-            </div>
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-white border border-orange-100 hover:border-orange-300 transition">
-              <div className="w-3.5 h-3.5 rounded" style={{ backgroundColor: "#3b82f6" }}></div>
-              <span className="text-xs font-semibold text-gray-700">Dining</span>
-            </div>
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-white border border-orange-100 hover:border-orange-300 transition">
-              <div className="w-3.5 h-3.5 rounded" style={{ backgroundColor: "#10b981" }}></div>
-              <span className="text-xs font-semibold text-gray-700">Parcel</span>
-            </div>
-          </div>
         </div>
       )}
 
