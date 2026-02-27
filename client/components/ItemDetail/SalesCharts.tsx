@@ -1,4 +1,4 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, Line } from "recharts";
 import { TrendingUp, BarChart3 } from "lucide-react";
 import { useState } from "react";
 
@@ -102,26 +102,14 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
 
         <div className="w-full h-96 bg-gray-900/30 rounded-lg p-4 border border-gray-800">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart
+            <ComposedChart
               data={allMonthsData}
               margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
             >
               <defs>
-                <linearGradient id="zomatoGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.8} />
-                  <stop offset="100%" stopColor="#ef4444" stopOpacity={0.6} />
-                </linearGradient>
-                <linearGradient id="swiggyGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f97316" stopOpacity={0.8} />
-                  <stop offset="100%" stopColor="#f97316" stopOpacity={0.6} />
-                </linearGradient>
-                <linearGradient id="diningGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.8} />
-                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.6} />
-                </linearGradient>
-                <linearGradient id="parcelGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.8} />
-                  <stop offset="100%" stopColor="#10b981" stopOpacity={0.6} />
+                <linearGradient id="dailySalesGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.9} />
+                  <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.7} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={true} />
@@ -136,7 +124,7 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
               <YAxis
                 stroke="#9ca3af"
                 tick={{ fill: "#d1d5db", fontSize: 12 }}
-                label={{ value: 'Quantity', angle: -90, position: 'insideLeft', style: { fill: '#d1d5db' } }}
+                label={{ value: 'Qty', angle: -90, position: 'insideLeft', style: { fill: '#d1d5db' } }}
               />
               <Tooltip
                 content={<CustomMonthlyTooltip />}
@@ -147,61 +135,26 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                 iconType="square"
               />
               <Bar
+                dataKey="totalQty"
+                fill="url(#dailySalesGradient)"
+                name="Daily Sales"
+                isAnimationActive={true}
+                animationDuration={600}
+                radius={[4, 4, 0, 0]}
+              />
+              <Line
+                type="monotone"
                 dataKey="zomatoQty"
-                stackId="quantity"
-                fill="url(#zomatoGradient)"
-                name="Zomato"
+                stroke="#a855f7"
+                strokeWidth={3}
+                name="Zomato Trend"
+                dot={{ fill: "#a855f7", r: 5 }}
+                activeDot={{ r: 7 }}
                 isAnimationActive={true}
                 animationDuration={600}
               />
-              <Bar
-                dataKey="swiggyQty"
-                stackId="quantity"
-                fill="url(#swiggyGradient)"
-                name="Swiggy"
-                isAnimationActive={true}
-                animationDuration={600}
-              />
-              <Bar
-                dataKey="diningQty"
-                stackId="quantity"
-                fill="url(#diningGradient)"
-                name="Dining"
-                isAnimationActive={true}
-                animationDuration={600}
-              />
-              <Bar
-                dataKey="parcelQty"
-                stackId="quantity"
-                fill="url(#parcelGradient)"
-                name="Parcel"
-                isAnimationActive={true}
-                animationDuration={600}
-              />
-            </BarChart>
+            </ComposedChart>
           </ResponsiveContainer>
-        </div>
-
-        <div className="mt-4 p-4 bg-gradient-to-r from-orange-900/30 to-orange-800/20 rounded-lg border border-orange-700/40">
-          <p className="text-xs font-semibold text-orange-400 uppercase tracking-wide mb-3">📊 Chart Legend</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded" style={{ backgroundColor: AREA_COLORS.zomato }}></div>
-              <span className="text-sm text-gray-300 font-medium">Zomato</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded" style={{ backgroundColor: AREA_COLORS.swiggy }}></div>
-              <span className="text-sm text-gray-300 font-medium">Swiggy</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded" style={{ backgroundColor: AREA_COLORS.dining }}></div>
-              <span className="text-sm text-gray-300 font-medium">Dining</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded" style={{ backgroundColor: AREA_COLORS.parcel }}></div>
-              <span className="text-sm text-gray-300 font-medium">Parcel</span>
-            </div>
-          </div>
         </div>
       </div>
 
