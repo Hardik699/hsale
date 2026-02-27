@@ -63,17 +63,6 @@ const CustomMonthlyTooltip = ({ active, payload }: any) => {
 
 export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {} }: SalesChartsProps) {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-  const [selectedChannels, setSelectedChannels] = useState<{
-    zomato: boolean;
-    swiggy: boolean;
-    dining: boolean;
-    parcel: boolean;
-  }>({
-    zomato: true,
-    swiggy: true,
-    dining: true,
-    parcel: true,
-  });
 
   // Create data for all 12 months (fill missing months with 0)
   const allMonthsData = MONTH_NAMES.map(month => {
@@ -107,44 +96,6 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             <BarChart3 className="w-5 h-5 text-white" />
           </div>
           <h2 className="text-2xl font-bold text-white">Monthly Sales Quantity</h2>
-        </div>
-
-        {/* Channel Selection Filter */}
-        <div className="mb-4 p-4 bg-gray-900/50 rounded-lg border border-gray-800">
-          <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">Select Channels</p>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { key: "zomato", label: "Zomato", color: "#ef4444" },
-              { key: "swiggy", label: "Swiggy", color: "#f97316" },
-              { key: "dining", label: "Dining", color: "#3b82f6" },
-              { key: "parcel", label: "Parcel", color: "#10b981" },
-            ].map((channel) => (
-              <button
-                key={channel.key}
-                onClick={() =>
-                  setSelectedChannels((prev) => ({
-                    ...prev,
-                    [channel.key]: !prev[channel.key as keyof typeof prev],
-                  }))
-                }
-                className={`px-4 py-2 rounded-lg font-bold text-sm transition-all border ${
-                  selectedChannels[channel.key as keyof typeof selectedChannels]
-                    ? "bg-opacity-80 border-opacity-100 text-white"
-                    : "bg-gray-800 border-gray-700 text-gray-500 opacity-50"
-                }`}
-                style={
-                  selectedChannels[channel.key as keyof typeof selectedChannels]
-                    ? {
-                        backgroundColor: channel.color,
-                        borderColor: channel.color,
-                      }
-                    : undefined
-                }
-              >
-                {channel.label}
-              </button>
-            ))}
-          </div>
         </div>
 
         <p className="text-sm text-gray-300 mb-4">Area-wise sales across all 12 months</p>
@@ -195,46 +146,38 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                 wrapperStyle={{ paddingTop: "20px", fontSize: 13 }}
                 iconType="square"
               />
-              {selectedChannels.zomato && (
-                <Bar
-                  dataKey="zomatoQty"
-                  stackId="quantity"
-                  fill="url(#zomatoGradient)"
-                  name="Zomato"
-                  isAnimationActive={true}
-                  animationDuration={600}
-                />
-              )}
-              {selectedChannels.swiggy && (
-                <Bar
-                  dataKey="swiggyQty"
-                  stackId="quantity"
-                  fill="url(#swiggyGradient)"
-                  name="Swiggy"
-                  isAnimationActive={true}
-                  animationDuration={600}
-                />
-              )}
-              {selectedChannels.dining && (
-                <Bar
-                  dataKey="diningQty"
-                  stackId="quantity"
-                  fill="url(#diningGradient)"
-                  name="Dining"
-                  isAnimationActive={true}
-                  animationDuration={600}
-                />
-              )}
-              {selectedChannels.parcel && (
-                <Bar
-                  dataKey="parcelQty"
-                  stackId="quantity"
-                  fill="url(#parcelGradient)"
-                  name="Parcel"
-                  isAnimationActive={true}
-                  animationDuration={600}
-                />
-              )}
+              <Bar
+                dataKey="zomatoQty"
+                stackId="quantity"
+                fill="url(#zomatoGradient)"
+                name="Zomato"
+                isAnimationActive={true}
+                animationDuration={600}
+              />
+              <Bar
+                dataKey="swiggyQty"
+                stackId="quantity"
+                fill="url(#swiggyGradient)"
+                name="Swiggy"
+                isAnimationActive={true}
+                animationDuration={600}
+              />
+              <Bar
+                dataKey="diningQty"
+                stackId="quantity"
+                fill="url(#diningGradient)"
+                name="Dining"
+                isAnimationActive={true}
+                animationDuration={600}
+              />
+              <Bar
+                dataKey="parcelQty"
+                stackId="quantity"
+                fill="url(#parcelGradient)"
+                name="Parcel"
+                isAnimationActive={true}
+                animationDuration={600}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
