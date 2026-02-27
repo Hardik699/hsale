@@ -34,6 +34,7 @@ interface SalesChartsProps {
   swiggyData?: any;
   diningData?: any;
   parcelData?: any;
+  unitType?: string;
 }
 
 const RESTAURANT_COLORS = [
@@ -51,62 +52,62 @@ const AREA_COLORS = {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// Custom tooltip to show both quantity and value with variations
-const CustomMonthlyTooltip = ({ active, payload }: any) => {
-  if (active && payload && payload.length > 0) {
-    const dataPoint = payload[0]?.payload;
-    const variations = dataPoint?.variations;
-
-    return (
-      <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-4 max-w-md">
-        <p className="font-bold text-white mb-3">{dataPoint?.month || "Month"}</p>
-
-        {/* Area-wise summary */}
-        {payload.map((entry: any, idx: number) => (
-          <p key={idx} style={{ color: entry.color }} className="text-xs font-medium text-gray-300">
-            {entry.name}: {entry.value.toLocaleString()} units
-          </p>
-        ))}
-
-        {/* Variation breakdown if available */}
-        {variations && (
-          <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
-            <p className="text-xs font-bold text-yellow-400 uppercase tracking-wider">Variation Breakdown</p>
-            {Object.entries(variations).map(([area, vars]: [string, any]) => {
-              const areaVars = Array.isArray(vars) ? vars : [];
-              if (areaVars.length === 0) return null;
-
-              return (
-                <div key={area} className="ml-2">
-                  <p className="text-xs font-semibold text-gray-400 capitalize">{area}:</p>
-                  {areaVars.map((v: any, idx: number) => (
-                    <div key={idx} className="ml-3 text-xs text-gray-300">
-                      <div className="flex justify-between gap-4">
-                        <span>{v.name}</span>
-                        <span className="font-mono">
-                          {v.quantity.toLocaleString()} units
-                          {v.value ? ` (₹${v.value.toLocaleString()})` : ""}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <p className="text-xs font-bold text-yellow-400 mt-3 border-t border-gray-700 pt-2">
-          Total: {payload.reduce((sum: number, p: any) => sum + p.value, 0).toLocaleString()} units
-        </p>
-      </div>
-    );
-  }
-  return null;
-};
-
-export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {} }: SalesChartsProps) {
+export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {}, unitType = "units" }: SalesChartsProps) {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+
+  // Custom tooltip to show both quantity and value with variations
+  const CustomMonthlyTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length > 0) {
+      const dataPoint = payload[0]?.payload;
+      const variations = dataPoint?.variations;
+
+      return (
+        <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-4 max-w-md">
+          <p className="font-bold text-white mb-3">{dataPoint?.month || "Month"}</p>
+
+          {/* Area-wise summary */}
+          {payload.map((entry: any, idx: number) => (
+            <p key={idx} style={{ color: entry.color }} className="text-xs font-medium text-gray-300">
+              {entry.name}: {entry.value.toLocaleString()} {unitType}
+            </p>
+          ))}
+
+          {/* Variation breakdown if available */}
+          {variations && (
+            <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
+              <p className="text-xs font-bold text-yellow-400 uppercase tracking-wider">Variation Breakdown</p>
+              {Object.entries(variations).map(([area, vars]: [string, any]) => {
+                const areaVars = Array.isArray(vars) ? vars : [];
+                if (areaVars.length === 0) return null;
+
+                return (
+                  <div key={area} className="ml-2">
+                    <p className="text-xs font-semibold text-gray-400 capitalize">{area}:</p>
+                    {areaVars.map((v: any, idx: number) => (
+                      <div key={idx} className="ml-3 text-xs text-gray-300">
+                        <div className="flex justify-between gap-4">
+                          <span>{v.name}</span>
+                          <span className="font-mono">
+                            {v.quantity.toLocaleString()} {unitType}
+                            {v.value ? ` (₹${v.value.toLocaleString()})` : ""}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="text-xs font-bold text-yellow-400 mt-3 border-t border-gray-700 pt-2">
+            Total: {payload.reduce((sum: number, p: any) => sum + p.value, 0).toLocaleString()} {unitType}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
 
   // Create data for all 12 months (fill missing months with 0)
   const allMonthsData = MONTH_NAMES.map(month => {

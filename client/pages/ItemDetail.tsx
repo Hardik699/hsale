@@ -782,6 +782,7 @@ export default function ItemDetail() {
                     swiggyData={salesData.swiggyData}
                     diningData={salesData.diningData}
                     parcelData={salesData.parcelData}
+                    unitType={item?.unitType || "units"}
                   />
 
                 </div>
