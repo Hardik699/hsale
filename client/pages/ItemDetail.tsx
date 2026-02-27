@@ -68,7 +68,7 @@ export default function ItemDetail() {
         if (retryCount === 0) setRestaurantsLoading(true);
 
         const controller = new AbortController();
-        const abortTimeoutId = setTimeout(() => controller.abort(), 15000);
+        const abortTimeoutId = setTimeout(() => controller.abort(), 30000);
 
         const response = await fetch("/api/sales/restaurants", {
           signal: controller.signal,
@@ -276,13 +276,13 @@ export default function ItemDetail() {
 
         console.log(`🔄 Fetching sales data (attempt ${retryCount + 1}): ${url.toString()}`);
 
-        // Increase timeout to 60 seconds for large datasets
+        // Increase timeout to 2 minutes for very large datasets
         timeoutId = setTimeout(() => {
           if (!isCleanup) {
-            console.warn("⚠️ Sales data fetch timeout after 60 seconds");
+            console.warn("⚠️ Sales data fetch timeout after 120 seconds");
             controller.abort();
           }
-        }, 60000);
+        }, 120000);
 
         const response = await fetch(url.toString(), {
           signal: controller.signal,
@@ -310,16 +310,26 @@ export default function ItemDetail() {
         }
       } catch (error: any) {
         if (error.name === "AbortError") {
-          console.log("🚫 Sales data fetch aborted");
+          console.warn("⚠️ Sales data fetch timed out (server took too long to respond)");
+          // Retry once if it's an abort error
+          if (retryCount < 1 && isMounted && !isCleanup) {
+            console.log("⏳ Retrying sales data fetch in 3 seconds...");
+            setTimeout(() => fetchSalesData(retryCount + 1), 3000);
+            return;
+          }
+          if (isMounted) {
+            setSalesData(null);
+            console.warn("⚠️ Failed to fetch sales data after timeout retries. Showing empty state.");
+          }
           return;
         }
 
-        console.error(`❌ Error fetching sales data (attempt ${retryCount + 1}):`, error);
+        console.error(`❌ Error fetching sales data (attempt ${retryCount + 1}):`, error.message);
 
-        // Retry once if it's a TypeError (Failed to fetch)
+        // Retry once if it's a TypeError (Failed to fetch - network error)
         if (retryCount < 1 && error instanceof TypeError && isMounted && !isCleanup) {
-          console.log("⏳ Retrying sales data fetch in 2 seconds...");
-          setTimeout(() => fetchSalesData(retryCount + 1), 2000);
+          console.log("⏳ Retrying sales data fetch in 3 seconds due to network error...");
+          setTimeout(() => fetchSalesData(retryCount + 1), 3000);
           return;
         }
 

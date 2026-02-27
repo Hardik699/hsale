@@ -96,6 +96,9 @@ export const handleGetItems: RequestHandler = async (req, res) => {
       return item;
     });
 
+    const responseSize = JSON.stringify(processedItems).length;
+    console.log(`📤 Items response size: ${(responseSize / 1024).toFixed(2)} KB`);
+
     res.json(processedItems);
   } catch (error) {
     console.error("❌ Error fetching items:", error);

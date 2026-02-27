@@ -30,7 +30,7 @@ export default function Items() {
         console.log(`🔄 Fetching items (attempt ${retryCount + 1})...`);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
         const response = await fetch("/api/items", {
           signal: controller.signal,
@@ -48,14 +48,14 @@ export default function Items() {
       } catch (error) {
         console.error("❌ Failed to fetch items:", error);
 
-        // Retry once after 2 seconds if it's a network error
+        // Retry once after 3 seconds if it's a network error or timeout
         if (
           retryCount < 1 &&
-          error instanceof TypeError &&
-          error.message.includes("Failed to fetch")
+          (error instanceof TypeError ||
+            (error instanceof Error && error.message.includes("Abort")))
         ) {
-          console.log("⏳ Retrying in 2 seconds...");
-          setTimeout(() => fetchItems(retryCount + 1), 2000);
+          console.log("⏳ Retrying in 3 seconds...");
+          setTimeout(() => fetchItems(retryCount + 1), 3000);
           return;
         }
 
