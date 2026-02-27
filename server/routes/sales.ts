@@ -524,20 +524,26 @@ export const handleGetItemSales: RequestHandler = async (req, res) => {
     };
 
     // Build monthly chart data
+    const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const monthlyData = Object.entries(monthlyByArea)
       .sort(([monthA], [monthB]) => monthA.localeCompare(monthB))
-      .map(([month, areas]) => ({
-        month,
-        zomatoQty: areas.zomato || 0,
-        swiggyQty: areas.swiggy || 0,
-        diningQty: areas.dining || 0,
-        parcelQty: areas.parcel || 0,
-        totalQty:
-          (areas.zomato || 0) +
-          (areas.swiggy || 0) +
-          (areas.dining || 0) +
-          (areas.parcel || 0),
-      }));
+      .map(([month, areas]) => {
+        // Convert "2025-03" format to "Mar"
+        const monthNum = parseInt(month.split('-')[1], 10);
+        const monthName = MONTH_NAMES[monthNum - 1] || month;
+        return {
+          month: monthName,
+          zomatoQty: areas.zomato || 0,
+          swiggyQty: areas.swiggy || 0,
+          diningQty: areas.dining || 0,
+          parcelQty: areas.parcel || 0,
+          totalQty:
+            (areas.zomato || 0) +
+            (areas.swiggy || 0) +
+            (areas.dining || 0) +
+            (areas.parcel || 0),
+        };
+      });
 
     // Build daily chart data
     const dateWiseData = Object.entries(dailyByArea)

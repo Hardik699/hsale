@@ -84,7 +84,16 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
 
   // Filter date-wise data if a month is selected
   const filteredDateWiseData = selectedMonth && dateWiseData
-    ? dateWiseData.filter(d => d.date.startsWith(selectedMonth))
+    ? (() => {
+        const monthNum = MONTH_NAMES.indexOf(selectedMonth) + 1;
+        const monthPadded = String(monthNum).padStart(2, '0');
+        return dateWiseData.filter(d => {
+          // dateWiseData has dates in YYYY-MM-DD format
+          // Extract the month part and compare
+          const dateMonth = d.date.split('-')[1];
+          return dateMonth === monthPadded;
+        });
+      })()
     : dateWiseData;
 
   return (
@@ -143,6 +152,12 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                 isAnimationActive={true}
                 animationDuration={600}
                 radius={[4, 4, 0, 0]}
+                onClick={(data: any) => {
+                  if (data?.month) {
+                    setSelectedMonth(data.month);
+                  }
+                }}
+                cursor="pointer"
               />
               <Line
                 type="monotone"
@@ -187,7 +202,7 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             )}
           </div>
 
-          <div className="w-full bg-slate-900/50 rounded-xl p-6 border border-gray-800/30">
+          <div className="w-full h-96 bg-slate-900/50 rounded-xl p-6 border border-gray-800/30">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={filteredDateWiseData}
