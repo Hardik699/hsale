@@ -38,9 +38,9 @@ interface SalesChartsProps {
 }
 
 const RESTAURANT_COLORS = [
-  "#ef4444", "#f97316", "#eab308", "#84cc16", "#22c55e", "#10b981",
-  "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6",
-  "#d946ef", "#ec4899", "#f43f5e"
+  "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef",
+  "#ec4899", "#f43f5e", "#ef4444", "#f97316", "#eab308", "#84cc16",
+  "#22c55e", "#10b981", "#14b8a6"
 ];
 
 const AREA_COLORS = {
@@ -334,14 +334,14 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
 
       {/* Restaurant Comparison Chart - Donut */}
       {restaurantSales && Object.keys(restaurantSales).length > 0 && (
-        <div className="bg-gray-950/95 rounded-2xl border border-gray-800/50 p-8 backdrop-blur-sm">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2.5 bg-blue-500/20 rounded-lg">
-              <BarChart3 className="w-5 h-5 text-blue-400" />
+        <div className="bg-gradient-to-br from-gray-950 via-slate-900 to-gray-950 rounded-2xl border border-gradient-to-r from-blue-500/20 via-purple-500/10 to-blue-500/20 p-8 backdrop-blur-sm shadow-xl shadow-blue-500/5">
+          <div className="flex items-center gap-3 mb-10">
+            <div className="p-3 bg-gradient-to-br from-blue-500/30 to-purple-500/20 rounded-xl border border-blue-400/30">
+              <BarChart3 className="w-5 h-5 text-blue-300" />
             </div>
             <div>
-              <h2 className="text-2xl font-black text-white tracking-tight">Restaurant Performance</h2>
-              <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-widest font-semibold">Comparative sales across restaurants</p>
+              <h2 className="text-3xl font-black text-white tracking-tight">Restaurant Performance</h2>
+              <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">Comparative sales across restaurants</p>
             </div>
           </div>
 
@@ -353,10 +353,10 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             const topRestaurantPercentage = totalSales > 0 ? ((topRestaurant[1] as number) / totalSales) * 100 : 0;
 
             return (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
                 {/* Donut Chart with Center Info */}
-                <div className="flex flex-col items-center justify-center">
-                  <div className="relative w-80 h-80">
+                <div className="lg:col-span-2 flex flex-col items-center justify-center">
+                  <div className="relative w-80 h-80 drop-shadow-2xl">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -367,24 +367,29 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                           }))}
                           cx="50%"
                           cy="50%"
-                          innerRadius={90}
-                          outerRadius={140}
-                          paddingAngle={1.5}
+                          innerRadius={85}
+                          outerRadius={135}
+                          paddingAngle={2}
                           dataKey="value"
                         >
                           {sortedRestaurants.map((_, idx) => (
-                            <Cell key={`cell-${idx}`} fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]} />
+                            <Cell
+                              key={`cell-${idx}`}
+                              fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
+                              opacity={0.95}
+                            />
                           ))}
                         </Pie>
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: "#1f2937",
-                            border: "1px solid #374151",
-                            borderRadius: "8px",
-                            padding: "8px 12px"
+                            backgroundColor: "#111827",
+                            border: "2px solid #1f2937",
+                            borderRadius: "12px",
+                            padding: "12px 16px",
+                            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3)"
                           }}
                           formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
-                          labelStyle={{ color: "#fff" }}
+                          labelStyle={{ color: "#fff", fontWeight: "bold" }}
                         />
                       </PieChart>
                     </ResponsiveContainer>
@@ -392,10 +397,10 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                     {/* Center Content */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <div className="text-center">
-                        <div className="text-4xl font-black text-white">
+                        <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
                           {topRestaurantPercentage.toFixed(1)}%
                         </div>
-                        <div className="text-sm font-semibold text-gray-400 mt-2">
+                        <div className="text-sm font-bold text-gray-300 mt-3 px-4">
                           {topRestaurant[0]}
                         </div>
                       </div>
@@ -404,29 +409,42 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                 </div>
 
                 {/* Legend with Details */}
-                <div className="flex flex-col justify-center">
+                <div className="lg:col-span-3 flex flex-col justify-center">
                   <div className="space-y-3">
                     {sortedRestaurants.map(([restaurant, sales], idx) => {
                       const percentage = totalSales > 0 ? ((sales as number) / totalSales) * 100 : 0;
                       const color = RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length];
 
                       return (
-                        <div key={restaurant} className="flex items-center justify-between p-4 bg-gray-900/40 rounded-xl hover:bg-gray-900/70 transition-all border border-gray-800/30">
+                        <div
+                          key={restaurant}
+                          className="group flex items-center justify-between p-5 bg-gradient-to-r from-gray-900/60 to-gray-900/30 rounded-xl hover:from-gray-800/80 hover:to-gray-800/40 transition-all duration-300 border border-gray-700/40 hover:border-gray-600/60 backdrop-blur-sm"
+                        >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
                             <div
-                              className="w-4 h-4 rounded-full flex-shrink-0 shadow-lg"
+                              className="w-5 h-5 rounded-full flex-shrink-0 shadow-xl ring-2 ring-white/20 group-hover:ring-white/40 transition-all"
                               style={{ backgroundColor: color }}
                             ></div>
-                            <span className="text-sm font-semibold text-gray-100 truncate">
-                              {restaurant}
-                            </span>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-bold text-gray-50 block truncate group-hover:text-white transition-colors">
+                                {restaurant}
+                              </span>
+                              <span className="text-xs text-gray-500 group-hover:text-gray-400 transition-colors">
+                                Sales Distribution
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-4 ml-4">
+                          <div className="flex items-center gap-6 ml-4">
                             <div className="text-right">
-                              <div className="text-xs text-gray-400 font-medium">
-                                {sales.toLocaleString()} {unitType}
+                              <div className="text-sm font-semibold text-gray-300 group-hover:text-gray-100 transition-colors">
+                                {sales.toLocaleString()}
                               </div>
-                              <div className="text-base font-bold text-white">
+                              <div className="text-xs text-gray-500">
+                                {unitType}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
                                 {percentage.toFixed(1)}%
                               </div>
                             </div>
