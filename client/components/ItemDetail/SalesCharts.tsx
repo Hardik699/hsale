@@ -345,86 +345,100 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Donut Chart */}
-            <div className="lg:col-span-1 flex justify-center">
-              <div className="w-full h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={Object.entries(restaurantSales as any)
-                        .map(([name, value], idx) => ({
-                          name,
-                          value: value as number,
-                          fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
-                        }))
-                        .sort((a, b) => b.value - a.value)}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={80}
-                      outerRadius={130}
-                      paddingAngle={2}
-                      dataKey="value"
-                    >
-                      {Object.entries(restaurantSales as any).map((_, idx) => (
-                        <Cell key={`cell-${idx}`} fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#1f2937",
-                        border: "1px solid #374151",
-                        borderRadius: "8px",
-                        padding: "8px 12px"
-                      }}
-                      formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
-                      labelStyle={{ color: "#fff" }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+          {(() => {
+            const totalSales = Object.values(restaurantSales as any).reduce((a: number, b: number) => a + b, 0);
+            const sortedRestaurants = Object.entries(restaurantSales as any)
+              .sort((a, b) => (b[1] as number) - (a[1] as number));
+            const topRestaurant = sortedRestaurants[0];
+            const topRestaurantPercentage = totalSales > 0 ? ((topRestaurant[1] as number) / totalSales) * 100 : 0;
 
-            {/* Legend with Details */}
-            <div className="lg:col-span-2 flex flex-col justify-center">
-              <div className="space-y-4">
-                {(() => {
-                  const totalSales = Object.values(restaurantSales as any).reduce((a: number, b: number) => a + b, 0);
-                  const sortedRestaurants = Object.entries(restaurantSales as any)
-                    .sort((a, b) => (b[1] as number) - (a[1] as number));
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Donut Chart with Center Info */}
+                <div className="flex flex-col items-center justify-center">
+                  <div className="relative w-80 h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={sortedRestaurants.map(([name, value], idx) => ({
+                            name,
+                            value: value as number,
+                            fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
+                          }))}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={90}
+                          outerRadius={140}
+                          paddingAngle={1.5}
+                          dataKey="value"
+                        >
+                          {sortedRestaurants.map((_, idx) => (
+                            <Cell key={`cell-${idx}`} fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#1f2937",
+                            border: "1px solid #374151",
+                            borderRadius: "8px",
+                            padding: "8px 12px"
+                          }}
+                          formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
+                          labelStyle={{ color: "#fff" }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
 
-                  return sortedRestaurants.map(([restaurant, sales], idx) => {
-                    const percentage = totalSales > 0 ? ((sales as number) / totalSales) * 100 : 0;
-                    const color = RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length];
-
-                    return (
-                      <div key={restaurant} className="flex items-center justify-between p-3 bg-gray-900/40 rounded-lg hover:bg-gray-900/60 transition-all">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div
-                            className="w-3 h-3 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: color }}
-                          ></div>
-                          <span className="text-sm font-semibold text-gray-200 truncate">
-                            {restaurant}
-                          </span>
+                    {/* Center Content */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-4xl font-black text-white">
+                          {topRestaurantPercentage.toFixed(1)}%
                         </div>
-                        <div className="flex items-center gap-4 ml-4">
-                          <div className="text-right">
-                            <div className="text-xs text-gray-400 font-medium">
-                              {sales.toLocaleString()} {unitType}
-                            </div>
-                            <div className="text-sm font-bold text-white">
-                              {percentage.toFixed(1)}%
+                        <div className="text-sm font-semibold text-gray-400 mt-2">
+                          {topRestaurant[0]}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Legend with Details */}
+                <div className="flex flex-col justify-center">
+                  <div className="space-y-3">
+                    {sortedRestaurants.map(([restaurant, sales], idx) => {
+                      const percentage = totalSales > 0 ? ((sales as number) / totalSales) * 100 : 0;
+                      const color = RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length];
+
+                      return (
+                        <div key={restaurant} className="flex items-center justify-between p-4 bg-gray-900/40 rounded-xl hover:bg-gray-900/70 transition-all border border-gray-800/30">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <div
+                              className="w-4 h-4 rounded-full flex-shrink-0 shadow-lg"
+                              style={{ backgroundColor: color }}
+                            ></div>
+                            <span className="text-sm font-semibold text-gray-100 truncate">
+                              {restaurant}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 ml-4">
+                            <div className="text-right">
+                              <div className="text-xs text-gray-400 font-medium">
+                                {sales.toLocaleString()} {unitType}
+                              </div>
+                              <div className="text-base font-bold text-white">
+                                {percentage.toFixed(1)}%
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  });
-                })()}
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       )}
 
