@@ -393,7 +393,7 @@ export const handleGetItemSales: RequestHandler = async (req, res) => {
       parcel: {},
     };
 
-    const monthlyByArea: { [key: string]: { [area: string]: number } } = {};
+    const monthlyByArea: { [key: string]: { [area: string]: { [variation: string]: { quantity: number; value: number } } } } = {};
     const dailyByArea: { [key: string]: { [area: string]: number } } = {};
     const restaurantSales: { [key: string]: number } = {};
 
@@ -488,11 +488,15 @@ export const handleGetItemSales: RequestHandler = async (req, res) => {
         salesByArea[normalizedArea][variationName].quantity += adjustedQuantity;
         salesByArea[normalizedArea][variationName].value += value;
 
-        // Aggregate by month & area
+        // Aggregate by month & area & variation
         const month = recordDate.toISOString().substring(0, 7);
         if (!monthlyByArea[month]) monthlyByArea[month] = {};
-        monthlyByArea[month][normalizedArea] =
-          (monthlyByArea[month][normalizedArea] || 0) + adjustedQuantity;
+        if (!monthlyByArea[month][normalizedArea]) monthlyByArea[month][normalizedArea] = {};
+        if (!monthlyByArea[month][normalizedArea][variationName]) {
+          monthlyByArea[month][normalizedArea][variationName] = { quantity: 0, value: 0 };
+        }
+        monthlyByArea[month][normalizedArea][variationName].quantity += adjustedQuantity;
+        monthlyByArea[month][normalizedArea][variationName].value += value;
 
         // Aggregate by day & area
         const day = recordDate.toISOString().substring(0, 10);
@@ -524,20 +528,56 @@ export const handleGetItemSales: RequestHandler = async (req, res) => {
     };
 
     // Build monthly chart data
+    const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const monthlyData = Object.entries(monthlyByArea)
       .sort(([monthA], [monthB]) => monthA.localeCompare(monthB))
-      .map(([month, areas]) => ({
-        month,
-        zomatoQty: areas.zomato || 0,
-        swiggyQty: areas.swiggy || 0,
-        diningQty: areas.dining || 0,
-        parcelQty: areas.parcel || 0,
-        totalQty:
-          (areas.zomato || 0) +
-          (areas.swiggy || 0) +
-          (areas.dining || 0) +
-          (areas.parcel || 0),
-      }));
+      .map(([month, areas]) => {
+        // Convert "2025-03" format to "Mar"
+        const monthNum = parseInt(month.split('-')[1], 10);
+        const monthName = MONTH_NAMES[monthNum - 1] || month;
+
+        // Calculate totals and variations for each area
+        const zomatoVariations = Object.entries(areas.zomato || {}).map(([varName, data]) => ({
+          name: varName,
+          quantity: data.quantity,
+          value: data.value,
+        }));
+        const swiggyVariations = Object.entries(areas.swiggy || {}).map(([varName, data]) => ({
+          name: varName,
+          quantity: data.quantity,
+          value: data.value,
+        }));
+        const diningVariations = Object.entries(areas.dining || {}).map(([varName, data]) => ({
+          name: varName,
+          quantity: data.quantity,
+          value: data.value,
+        }));
+        const parcelVariations = Object.entries(areas.parcel || {}).map(([varName, data]) => ({
+          name: varName,
+          quantity: data.quantity,
+          value: data.value,
+        }));
+
+        const zomatoQty = zomatoVariations.reduce((sum, v) => sum + v.quantity, 0);
+        const swiggyQty = swiggyVariations.reduce((sum, v) => sum + v.quantity, 0);
+        const diningQty = diningVariations.reduce((sum, v) => sum + v.quantity, 0);
+        const parcelQty = parcelVariations.reduce((sum, v) => sum + v.quantity, 0);
+
+        return {
+          month: monthName,
+          zomatoQty,
+          swiggyQty,
+          diningQty,
+          parcelQty,
+          totalQty: zomatoQty + swiggyQty + diningQty + parcelQty,
+          variations: {
+            zomato: zomatoVariations,
+            swiggy: swiggyVariations,
+            dining: diningVariations,
+            parcel: parcelVariations,
+          },
+        };
+      });
 
     // Build daily chart data
     const dateWiseData = Object.entries(dailyByArea)
