@@ -332,6 +332,73 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
         </div>
       )}
 
+      {/* Restaurant Comparison Chart */}
+      {restaurantSales && Object.keys(restaurantSales).length > 0 && (
+        <div className="bg-gray-950/95 rounded-2xl border border-gray-800/50 p-8 backdrop-blur-sm">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="p-2.5 bg-blue-500/20 rounded-lg">
+              <BarChart3 className="w-5 h-5 text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-white tracking-tight">Restaurant Performance</h2>
+              <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-widest font-semibold">Comparative sales across restaurants</p>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {/* Calculate totals for percentage calculation */}
+            {(() => {
+              const totalSales = Object.values(restaurantSales as any).reduce((a: number, b: number) => a + b, 0);
+              const sortedRestaurants = Object.entries(restaurantSales as any)
+                .sort((a, b) => (b[1] as number) - (a[1] as number));
+
+              return (
+                <div className="space-y-5">
+                  {sortedRestaurants.map(([restaurant, sales], idx) => {
+                    const percentage = totalSales > 0 ? ((sales as number) / totalSales) * 100 : 0;
+                    const color = RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length];
+
+                    return (
+                      <div key={restaurant} className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 flex-1">
+                            <div
+                              className="w-3 h-3 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: color }}
+                            ></div>
+                            <span className="text-sm font-semibold text-gray-200 flex-1 truncate">
+                              {restaurant}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs text-gray-400 font-medium min-w-fit">
+                              {sales.toLocaleString()} {unitType}
+                            </span>
+                            <span className="text-sm font-bold text-gray-100 min-w-[3rem] text-right">
+                              {percentage.toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${percentage}%`,
+                              backgroundColor: color,
+                              opacity: 0.9
+                            }}
+                          ></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
