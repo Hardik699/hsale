@@ -332,7 +332,7 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
         </div>
       )}
 
-      {/* Restaurant Comparison Chart */}
+      {/* Restaurant Comparison Chart - Donut */}
       {restaurantSales && Object.keys(restaurantSales).length > 0 && (
         <div className="bg-gray-950/95 rounded-2xl border border-gray-800/50 p-8 backdrop-blur-sm">
           <div className="flex items-center gap-3 mb-8">
@@ -345,56 +345,85 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
             </div>
           </div>
 
-          <div className="space-y-6">
-            {/* Calculate totals for percentage calculation */}
-            {(() => {
-              const totalSales = Object.values(restaurantSales as any).reduce((a: number, b: number) => a + b, 0);
-              const sortedRestaurants = Object.entries(restaurantSales as any)
-                .sort((a, b) => (b[1] as number) - (a[1] as number));
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Donut Chart */}
+            <div className="lg:col-span-1 flex justify-center">
+              <div className="w-full h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={Object.entries(restaurantSales as any)
+                        .map(([name, value], idx) => ({
+                          name,
+                          value: value as number,
+                          fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
+                        }))
+                        .sort((a, b) => b.value - a.value)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={130}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {Object.entries(restaurantSales as any).map((_, idx) => (
+                        <Cell key={`cell-${idx}`} fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#1f2937",
+                        border: "1px solid #374151",
+                        borderRadius: "8px",
+                        padding: "8px 12px"
+                      }}
+                      formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
+                      labelStyle={{ color: "#fff" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
 
-              return (
-                <div className="space-y-5">
-                  {sortedRestaurants.map(([restaurant, sales], idx) => {
+            {/* Legend with Details */}
+            <div className="lg:col-span-2 flex flex-col justify-center">
+              <div className="space-y-4">
+                {(() => {
+                  const totalSales = Object.values(restaurantSales as any).reduce((a: number, b: number) => a + b, 0);
+                  const sortedRestaurants = Object.entries(restaurantSales as any)
+                    .sort((a, b) => (b[1] as number) - (a[1] as number));
+
+                  return sortedRestaurants.map(([restaurant, sales], idx) => {
                     const percentage = totalSales > 0 ? ((sales as number) / totalSales) * 100 : 0;
                     const color = RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length];
 
                     return (
-                      <div key={restaurant} className="flex flex-col gap-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 flex-1">
-                            <div
-                              className="w-3 h-3 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: color }}
-                            ></div>
-                            <span className="text-sm font-semibold text-gray-200 flex-1 truncate">
-                              {restaurant}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-xs text-gray-400 font-medium min-w-fit">
-                              {sales.toLocaleString()} {unitType}
-                            </span>
-                            <span className="text-sm font-bold text-gray-100 min-w-[3rem] text-right">
-                              {percentage.toFixed(1)}%
-                            </span>
-                          </div>
-                        </div>
-                        <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden">
+                      <div key={restaurant} className="flex items-center justify-between p-3 bg-gray-900/40 rounded-lg hover:bg-gray-900/60 transition-all">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
                           <div
-                            className="h-full rounded-full transition-all duration-500"
-                            style={{
-                              width: `${percentage}%`,
-                              backgroundColor: color,
-                              opacity: 0.9
-                            }}
+                            className="w-3 h-3 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: color }}
                           ></div>
+                          <span className="text-sm font-semibold text-gray-200 truncate">
+                            {restaurant}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 ml-4">
+                          <div className="text-right">
+                            <div className="text-xs text-gray-400 font-medium">
+                              {sales.toLocaleString()} {unitType}
+                            </div>
+                            <div className="text-sm font-bold text-white">
+                              {percentage.toFixed(1)}%
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-              );
-            })()}
+                  });
+                })()}
+              </div>
+            </div>
           </div>
         </div>
       )}
