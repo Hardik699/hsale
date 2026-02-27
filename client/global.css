@@ -1,0 +1,255 @@
+/** @import must precede all other statements */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@700;800;900&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Tailwind CSS theme
+   * tailwind.config.ts expects the following color variables to be expressed as HSL values.
+   * A different format will require also updating the theme in tailwind.config.ts.
+  */
+  :root {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 134 100% 48%;
+    --primary-foreground: 240 13% 13%;
+
+    --secondary: 333 94% 54%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 134 100% 48%;
+    --accent-foreground: 240 13% 13%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 134 100% 48%;
+
+    --radius: 0.625rem;
+
+    --sidebar-background: 240 13% 13%;
+
+    --sidebar-foreground: 240 4.8% 95.9%;
+
+    --sidebar-primary: 134 100% 48%;
+
+    --sidebar-primary-foreground: 0 0% 100%;
+
+    --sidebar-accent: 240 3.7% 15.9%;
+
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+
+    --sidebar-border: 240 3.7% 15.9%;
+
+    --sidebar-ring: 134 100% 48%;
+
+    --orange: 36 100% 50%;
+    --teal: 167 84% 55%;
+    --purple: 259 89% 65%;
+    --pink: 333 94% 54%;
+    --blue: 220 100% 50%;
+    --neon-green: 120 100% 50%;
+    --dark-bg: 0 0% 10%;
+  }
+
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  :where(p, span, li, h1, h2, h3, h4, h5, h6, a, button, label, td, th) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  pre,
+  code {
+    overflow-x: auto;
+    white-space: pre;
+  }
+}
+
+@layer components {
+  /* Stylish headings */
+  .heading-stylish {
+    @apply font-extrabold tracking-tight;
+    font-family: "Poppins", sans-serif;
+  }
+
+  /* Light theme text styling */
+  .light-text-primary {
+    @apply text-slate-900 dark:text-white;
+  }
+
+  .light-text-secondary {
+    @apply text-slate-600 dark:text-slate-400;
+  }
+
+  .light-text-accent {
+    @apply text-blue-600 dark:text-blue-400;
+  }
+
+  /* Light mode background gradients */
+  .light-bg-subtle {
+    @apply bg-gradient-to-br from-slate-50 to-blue-50 dark:bg-slate-900;
+  }
+
+  .light-card-bg {
+    @apply bg-white dark:bg-slate-800;
+  }
+
+  /* Login Page Animations */
+  @keyframes float-in {
+    0% {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes glow-pulse {
+    0%, 100% {
+      box-shadow: 0 0 20px rgba(0, 255, 0, 0.3), 0 0 40px rgba(0, 100, 255, 0.2);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(0, 255, 0, 0.5), 0 0 60px rgba(0, 100, 255, 0.3);
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -1000px 0;
+    }
+    100% {
+      background-position: 1000px 0;
+    }
+  }
+
+  @keyframes slide-in-left {
+    0% {
+      opacity: 0;
+      transform: translateX(-30px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes gradient-shift {
+    0%, 100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  .animate-float-in {
+    animation: float-in 0.6s ease-out;
+  }
+
+  .animate-glow-pulse {
+    animation: glow-pulse 3s ease-in-out infinite;
+  }
+
+  .animate-slide-in-left {
+    animation: slide-in-left 0.6s ease-out;
+  }
+
+  .animate-gradient-shift {
+    animation: gradient-shift 8s ease infinite;
+    background-size: 200% 200%;
+  }
+
+  /* Input Focus Animations */
+  .input-focus-glow {
+    @apply transition-all duration-300;
+  }
+
+  .input-focus-glow:focus {
+    @apply ring-2 ring-offset-2 ring-blue-500;
+    box-shadow: 0 0 15px rgba(0, 100, 255, 0.4);
+  }
+
+  /* Button Hover Effects */
+  .btn-modern {
+    @apply relative overflow-hidden transition-all duration-500;
+  }
+
+  .btn-modern::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    transition: left 0.5s ease;
+  }
+
+  .btn-modern:hover::before {
+    left: 100%;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-900/20;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-700/50 rounded-full hover:bg-slate-600 transition-colors;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-slate-900/50;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-700/80 rounded-full hover:bg-slate-600 transition-colors;
+  }
+
+  /* Hide Scrollbar */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+}
