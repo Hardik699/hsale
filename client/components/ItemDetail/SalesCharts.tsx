@@ -34,6 +34,7 @@ interface SalesChartsProps {
   swiggyData?: any;
   diningData?: any;
   parcelData?: any;
+  unitType?: string;
 }
 
 const RESTAURANT_COLORS = [
@@ -52,7 +53,7 @@ const AREA_COLORS = {
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Custom tooltip to show both quantity and value with variations
-const CustomMonthlyTooltip = ({ active, payload }: any) => {
+const CustomMonthlyTooltip = ({ active, payload, unitType = "units" }: any) => {
   if (active && payload && payload.length > 0) {
     const dataPoint = payload[0]?.payload;
     const variations = dataPoint?.variations;
@@ -64,7 +65,7 @@ const CustomMonthlyTooltip = ({ active, payload }: any) => {
         {/* Area-wise summary */}
         {payload.map((entry: any, idx: number) => (
           <p key={idx} style={{ color: entry.color }} className="text-xs font-medium text-gray-300">
-            {entry.name}: {entry.value.toLocaleString()} units
+            {entry.name}: {entry.value.toLocaleString()} {unitType}
           </p>
         ))}
 
@@ -84,7 +85,7 @@ const CustomMonthlyTooltip = ({ active, payload }: any) => {
                       <div className="flex justify-between gap-4">
                         <span>{v.name}</span>
                         <span className="font-mono">
-                          {v.quantity.toLocaleString()} units
+                          {v.quantity.toLocaleString()} {unitType}
                           {v.value ? ` (₹${v.value.toLocaleString()})` : ""}
                         </span>
                       </div>
@@ -97,7 +98,7 @@ const CustomMonthlyTooltip = ({ active, payload }: any) => {
         )}
 
         <p className="text-xs font-bold text-yellow-400 mt-3 border-t border-gray-700 pt-2">
-          Total: {payload.reduce((sum: number, p: any) => sum + p.value, 0).toLocaleString()} units
+          Total: {payload.reduce((sum: number, p: any) => sum + p.value, 0).toLocaleString()} {unitType}
         </p>
       </div>
     );
@@ -105,8 +106,11 @@ const CustomMonthlyTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {} }: SalesChartsProps) {
+export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {}, unitType = "units" }: SalesChartsProps) {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+
+  // Create tooltip component with unitType bound
+  const TooltipWithUnit = (props: any) => <CustomMonthlyTooltip {...props} unitType={unitType} />;
 
   // Create data for all 12 months (fill missing months with 0)
   const allMonthsData = MONTH_NAMES.map(month => {
@@ -181,7 +185,7 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
                 label={{ value: 'Qty', angle: -90, position: 'insideLeft', offset: 5, style: { fill: '#9ca3af', fontSize: 11 } }}
               />
               <Tooltip
-                content={<CustomMonthlyTooltip />}
+                content={<TooltipWithUnit />}
                 cursor={{ fill: "rgba(168, 85, 247, 0.08)" }}
               />
               <Legend

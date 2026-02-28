@@ -606,10 +606,12 @@ export const handleGetItemSales: RequestHandler = async (req, res) => {
       restaurantSales,
     };
 
+    const responseSize = JSON.stringify(salesData).length;
     console.log(`✅ Sales data for ${itemId}:`, {
       totalRecords,
       matchedRecords,
       dateFilterSkipped,
+      responseSizeKB: (responseSize / 1024).toFixed(2),
       zomato: salesData.zomatoData.quantity,
       swiggy: salesData.swiggyData.quantity,
       dining: salesData.diningData.quantity,

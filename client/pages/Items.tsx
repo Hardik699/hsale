@@ -25,12 +25,14 @@ export default function Items() {
   // Fetch items from MongoDB on component mount
   useEffect(() => {
     const fetchItems = async (retryCount = 0) => {
+      // Create a new AbortController for each fetch attempt
+      const controller = new AbortController();
+
       try {
         setLoading(true);
         console.log(`🔄 Fetching items (attempt ${retryCount + 1})...`);
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
         const response = await fetch("/api/items", {
           signal: controller.signal,
@@ -45,18 +47,16 @@ export default function Items() {
         const data = await response.json();
         console.log(`✅ Loaded ${data.length} items from MongoDB`);
         setItems(Array.isArray(data) ? data : []);
-      } catch (error) {
+      } catch (error: any) {
         console.error("❌ Failed to fetch items:", error);
 
-        // Retry once after 2 seconds if it's a network error
-        if (
-          retryCount < 1 &&
-          error instanceof TypeError &&
-          error.message.includes("Failed to fetch")
-        ) {
-          console.log("⏳ Retrying in 2 seconds...");
-          setTimeout(() => fetchItems(retryCount + 1), 2000);
-          return;
+        // Retry once after 3 seconds if it's a network error or timeout
+        if (retryCount < 1) {
+          if (error instanceof TypeError || error.name === "AbortError") {
+            console.log("⏳ Retrying in 3 seconds...");
+            setTimeout(() => fetchItems(retryCount + 1), 3000);
+            return;
+          }
         }
 
         setItems([]);

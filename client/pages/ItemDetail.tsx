@@ -63,12 +63,14 @@ export default function ItemDetail() {
     let timeoutId: NodeJS.Timeout | null = null;
 
     const fetchRestaurants = async (retryCount = 0) => {
+      // Create a new AbortController for each fetch attempt
+      const controller = new AbortController();
+
       try {
         if (!isMounted) return;
         if (retryCount === 0) setRestaurantsLoading(true);
 
-        const controller = new AbortController();
-        const abortTimeoutId = setTimeout(() => controller.abort(), 15000);
+        const abortTimeoutId = setTimeout(() => controller.abort(), 30000);
 
         const response = await fetch("/api/sales/restaurants", {
           signal: controller.signal,
@@ -93,10 +95,10 @@ export default function ItemDetail() {
           }
         }
       } catch (error) {
-        if (error instanceof Error && error.name !== "AbortError") {
-          console.warn(`⚠️ Restaurant fetch failed (attempt ${retryCount + 1}):`, error);
-          // Retry once on network errors
-          if (retryCount < 1 && error instanceof TypeError && isMounted) {
+        console.warn(`⚠️ Restaurant fetch failed (attempt ${retryCount + 1}):`, error);
+        // Retry once on network errors or timeout
+        if (retryCount < 1 && isMounted) {
+          if (error instanceof TypeError || (error instanceof Error && error.name === "AbortError")) {
             console.log("⏳ Retrying restaurant fetch in 2 seconds...");
             timeoutId = setTimeout(() => fetchRestaurants(retryCount + 1), 2000);
             return;
@@ -123,9 +125,11 @@ export default function ItemDetail() {
 
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
 
     const fetchItem = async (retryCount = 0) => {
+      // Create a new AbortController for each fetch attempt
+      const controller = new AbortController();
+
       try {
         if (isMounted && retryCount === 0) setLoading(true);
         setError(null);
@@ -133,7 +137,7 @@ export default function ItemDetail() {
         console.log(`🔍 Fetching item with ID: "${itemId}" (attempt ${retryCount + 1})`);
 
         // Fetch all items and find the one we need with timeout
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
         const response = await fetch("/api/items", {
           signal: controller.signal,
@@ -175,18 +179,15 @@ export default function ItemDetail() {
           if (isMounted) setItem(foundItem);
         }
       } catch (error: any) {
-        if (error.name === "AbortError") {
-          console.log("🚫 Item fetch aborted");
-          return;
-        }
-
         console.error(`❌ Error fetching item (attempt ${retryCount + 1}):`, error.message);
 
-        // Retry once if it's a TypeError
-        if (retryCount < 1 && error instanceof TypeError && isMounted) {
-          console.log("⏳ Retrying item fetch in 2 seconds...");
-          setTimeout(() => fetchItem(retryCount + 1), 2000);
-          return;
+        // Retry once if it's a network error or timeout
+        if (retryCount < 1 && isMounted) {
+          if (error instanceof TypeError || error.name === "AbortError") {
+            console.log("⏳ Retrying item fetch in 3 seconds...");
+            setTimeout(() => fetchItem(retryCount + 1), 3000);
+            return;
+          }
         }
 
         if (isMounted) {
@@ -252,7 +253,6 @@ export default function ItemDetail() {
 
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
     let timeoutId: NodeJS.Timeout | null = null;
     let isCleanup = false;
 
@@ -261,6 +261,9 @@ export default function ItemDetail() {
         if (isMounted) setSalesData(null);
         return;
       }
+
+      // Create a new AbortController for each fetch attempt
+      const controller = new AbortController();
 
       try {
         if (isMounted && retryCount === 0) setSalesLoading(true);
@@ -276,13 +279,13 @@ export default function ItemDetail() {
 
         console.log(`🔄 Fetching sales data (attempt ${retryCount + 1}): ${url.toString()}`);
 
-        // Increase timeout to 60 seconds for large datasets
+        // Increase timeout to 2 minutes for very large datasets
         timeoutId = setTimeout(() => {
           if (!isCleanup) {
-            console.warn("⚠️ Sales data fetch timeout after 60 seconds");
+            console.warn("⚠️ Sales data fetch timeout after 120 seconds");
             controller.abort();
           }
-        }, 60000);
+        }, 120000);
 
         const response = await fetch(url.toString(), {
           signal: controller.signal,
@@ -310,16 +313,26 @@ export default function ItemDetail() {
         }
       } catch (error: any) {
         if (error.name === "AbortError") {
-          console.log("🚫 Sales data fetch aborted");
+          console.warn("⚠️ Sales data fetch timed out (server took too long to respond)");
+          // Retry once if it's an abort error
+          if (retryCount < 1 && isMounted && !isCleanup) {
+            console.log("⏳ Retrying sales data fetch in 3 seconds...");
+            setTimeout(() => fetchSalesData(retryCount + 1), 3000);
+            return;
+          }
+          if (isMounted) {
+            setSalesData(null);
+            console.warn("⚠️ Failed to fetch sales data after timeout retries. Showing empty state.");
+          }
           return;
         }
 
-        console.error(`❌ Error fetching sales data (attempt ${retryCount + 1}):`, error);
+        console.error(`❌ Error fetching sales data (attempt ${retryCount + 1}):`, error.message);
 
-        // Retry once if it's a TypeError (Failed to fetch)
+        // Retry once if it's a TypeError (Failed to fetch - network error)
         if (retryCount < 1 && error instanceof TypeError && isMounted && !isCleanup) {
-          console.log("⏳ Retrying sales data fetch in 2 seconds...");
-          setTimeout(() => fetchSalesData(retryCount + 1), 2000);
+          console.log("⏳ Retrying sales data fetch in 3 seconds due to network error...");
+          setTimeout(() => fetchSalesData(retryCount + 1), 3000);
           return;
         }
 
