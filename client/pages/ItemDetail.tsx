@@ -910,6 +910,12 @@ export default function ItemDetail() {
                     diningData={salesData.diningData}
                     parcelData={salesData.parcelData}
                     unitType={item?.unitType || "units"}
+                    comparisonMode={comparisonMode}
+                    comparisonMonthlyData={comparisonSalesData?.monthlyData}
+                    comparisonDateWiseData={comparisonSalesData?.dateWiseData}
+                    comparisonRestaurantSales={comparisonSalesData?.restaurantSales}
+                    dateRange={dateRange}
+                    comparisonDateRange={comparisonDateRange}
                   />
 
                   {/* Comparison Summary */}
