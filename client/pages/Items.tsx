@@ -162,7 +162,7 @@ export default function Items() {
             // Get channel price
             const channelPrice = foundVariation.channels?.[channel];
             if (channelPrice && channelPrice > 0) {
-              price = `₹${channelPrice}`;
+              price = channelPrice.toString();
             }
           }
           row.push(price);
