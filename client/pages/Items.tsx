@@ -95,67 +95,87 @@ export default function Items() {
   }, []);
 
   const handleDownload = () => {
-    // Export items as CSV/Excel
+    // Export items as CSV (Excel-compatible format)
     const csv = convertToCSV(items);
-    const blob = new Blob([csv], { type: "text/csv" });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "items.csv";
+    a.download = `items-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   };
 
   const convertToCSV = (data: any[]) => {
     if (data.length === 0) return "";
 
-    // Define the columns to export
-    const headers = [
-      "Item ID",
-      "Item Name",
-      "Short Code",
-      "Description",
-      "HSN Code",
-      "Group",
-      "Category",
-      "Profit Margin (%)",
-      "GST (%)",
-      "Item Type",
-      "Unit Type",
-      "Variations",
-      "Images Count",
-    ];
+    const CHANNELS = ["Dining", "Parcel", "Swiggy", "Zomato"];
 
-    const rows = data.map((item) => [
-      item.itemId,
-      item.itemName,
-      item.shortCode,
-      item.description || "",
-      item.hsnCode || "",
-      item.group,
-      item.category,
-      item.profitMargin || 0,
-      item.gst || 0,
-      item.itemType,
-      item.unitType,
-      item.variations?.map((v: any) => `${v.name}: ${v.value}`).join("; ") ||
-        "",
-      item.images?.length || 0,
-    ]);
+    // Collect all unique variations across all items
+    const allVariations = Array.from(
+      new Set(
+        data.flatMap((item) =>
+          item.variations?.map((v: any) => `${v.name} - ${v.value}`) || []
+        )
+      )
+    ).sort();
 
+    // Build dynamic headers: Item Name, Group, Category, then pricing columns
+    const headers = ["Item ID", "Item Name", "Group", "Category"];
+
+    // Add pricing columns for each variation and channel
+    allVariations.forEach((variation) => {
+      CHANNELS.forEach((channel) => {
+        headers.push(`${variation} - ${channel}`);
+      });
+    });
+
+    // Helper function to escape CSV cells
+    const escapeCell = (cell: any) => {
+      const value = String(cell || "-");
+      return value.includes(",") || value.includes('"') || value.includes("\n")
+        ? `"${value.replace(/"/g, '""')}"`
+        : value;
+    };
+
+    // Build rows with pricing data
+    const rows = data.map((item) => {
+      const row = [
+        item.itemId,
+        item.itemName,
+        item.group || "",
+        item.category || "",
+      ];
+
+      // Add pricing for each variation/channel combination
+      allVariations.forEach((variation) => {
+        const [varName, varValue] = variation.split(" - ");
+        const foundVariation = item.variations?.find(
+          (v: any) => v.name === varName && v.value === varValue
+        );
+
+        CHANNELS.forEach((channel) => {
+          let price = "-";
+          if (foundVariation) {
+            // Get channel price
+            const channelPrice = foundVariation.channels?.[channel];
+            if (channelPrice && channelPrice > 0) {
+              price = `₹${channelPrice}`;
+            }
+          }
+          row.push(price);
+        });
+      });
+
+      return row;
+    });
+
+    // Generate CSV
     const csv = [
-      headers.join(","),
-      ...rows.map((row) =>
-        row
-          .map((cell) => {
-            const value = String(cell || "");
-            return value.includes(",") ||
-              value.includes('"') ||
-              value.includes("\n")
-              ? `"${value.replace(/"/g, '""')}"`
-              : value;
-          })
-          .join(","),
-      ),
+      headers.map(escapeCell).join(","),
+      ...rows.map((row) => row.map(escapeCell).join(",")),
     ].join("\n");
 
     return csv;
