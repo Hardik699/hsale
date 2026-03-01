@@ -35,6 +35,12 @@ interface SalesChartsProps {
   diningData?: any;
   parcelData?: any;
   unitType?: string;
+  comparisonMode?: boolean;
+  comparisonMonthlyData?: MonthlyData[];
+  comparisonDateWiseData?: DateWiseData[];
+  comparisonRestaurantSales?: { [key: string]: number };
+  dateRange?: { start: string; end: string };
+  comparisonDateRange?: { start: string; end: string };
 }
 
 const RESTAURANT_COLORS = [
@@ -52,7 +58,18 @@ const AREA_COLORS = {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {}, unitType = "units" }: SalesChartsProps) {
+export default function SalesCharts({
+  monthlyData,
+  dateWiseData,
+  restaurantSales = {},
+  unitType = "units",
+  comparisonMode = false,
+  comparisonMonthlyData,
+  comparisonDateWiseData,
+  comparisonRestaurantSales = {},
+  dateRange,
+  comparisonDateRange
+}: SalesChartsProps) {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [hoveredRestaurant, setHoveredRestaurant] = useState<string | null>(null);
 
@@ -515,6 +532,117 @@ export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* Comparison Restaurant Performance */}
+      {comparisonMode && comparisonRestaurantSales && Object.keys(comparisonRestaurantSales).length > 0 && (
+        <div className="bg-gradient-to-br from-slate-900 via-gray-950 to-slate-900 rounded-2xl border border-blue-500/20 p-8 backdrop-blur-sm shadow-xl shadow-blue-500/10">
+          <div className="flex items-center gap-3 mb-10">
+            <div className="p-3 bg-gradient-to-br from-blue-500/30 to-blue-500/20 rounded-xl border border-blue-400/30">
+              <BarChart3 className="w-5 h-5 text-blue-300" />
+            </div>
+            <div>
+              <h2 className="text-3xl font-black text-white tracking-tight">Comparison: Restaurant Performance</h2>
+              <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">
+                Period 1: {dateRange?.start} to {dateRange?.end} vs Period 2: {comparisonDateRange?.start} to {comparisonDateRange?.end}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Period 1 Chart */}
+            <div>
+              <h3 className="text-lg font-bold text-white mb-4 pb-3 border-b border-gray-800">Period 1 Data</h3>
+              <div className="relative w-full h-80">
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent rounded-full blur-3xl -z-10 animate-pulse"></div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={Object.entries(restaurantSales as any)
+                        .map(([name, value], idx) => ({
+                          name,
+                          value: value as number,
+                          fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
+                        }))
+                        .sort((a, b) => b.value - a.value)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={70}
+                      outerRadius={110}
+                      paddingAngle={2}
+                      dataKey="value"
+                      animationDuration={600}
+                    >
+                      {Object.entries(restaurantSales as any).map((_, idx) => (
+                        <Cell
+                          key={`cell-${idx}`}
+                          fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
+                          opacity={0.9}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#111827",
+                        border: "2px solid #10b981",
+                        borderRadius: "12px",
+                        padding: "12px 16px",
+                      }}
+                      formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
+                      labelStyle={{ color: "#fff", fontWeight: "bold" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Period 2 Chart */}
+            <div>
+              <h3 className="text-lg font-bold text-blue-400 mb-4 pb-3 border-b border-blue-800">Period 2 Data</h3>
+              <div className="relative w-full h-80">
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent rounded-full blur-3xl -z-10 animate-pulse"></div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={Object.entries(comparisonRestaurantSales as any)
+                        .map(([name, value], idx) => ({
+                          name,
+                          value: value as number,
+                          fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
+                        }))
+                        .sort((a, b) => b.value - a.value)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={70}
+                      outerRadius={110}
+                      paddingAngle={2}
+                      dataKey="value"
+                      animationDuration={600}
+                    >
+                      {Object.entries(comparisonRestaurantSales as any).map((_, idx) => (
+                        <Cell
+                          key={`cell-${idx}`}
+                          fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
+                          opacity={0.9}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#111827",
+                        border: "2px solid #3b82f6",
+                        borderRadius: "12px",
+                        padding: "12px 16px",
+                      }}
+                      formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
+                      labelStyle={{ color: "#fff", fontWeight: "bold" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
