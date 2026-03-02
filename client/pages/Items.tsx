@@ -31,13 +31,25 @@ export default function Items() {
         setLoading(true);
         console.log(`🔄 Fetching items (attempt ${retryCount + 1})...`);
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        // First check if server is responding
+        try {
+          const healthCheck = await fetch("/api/health", {
+            method: "GET",
+            signal: AbortSignal.timeout(5000)
+          }).catch(() => null);
+
+          if (!healthCheck?.ok) {
+            throw new Error("Server not responding to health check");
+          }
+          console.log("✅ Server health check passed");
+        } catch (healthError) {
+          console.warn("⚠️ Health check failed:", healthError);
+          throw new Error(`Server unreachable: ${healthError instanceof Error ? healthError.message : "Unknown error"}`);
+        }
 
         const response = await fetch("/api/items", {
-          signal: controller.signal,
+          signal: AbortSignal.timeout(10000),
         });
-        clearTimeout(timeoutId);
 
         if (!response.ok) {
           throw new Error(
@@ -48,13 +60,15 @@ export default function Items() {
         console.log(`✅ Loaded ${data.length} items from MongoDB`);
         setItems(Array.isArray(data) ? data : []);
       } catch (error) {
-        console.error("❌ Failed to fetch items:", error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error("❌ Failed to fetch items:", errorMsg);
 
         // Retry once after 2 seconds if it's a network error
         if (
           retryCount < 1 &&
-          error instanceof TypeError &&
-          error.message.includes("Failed to fetch")
+          (errorMsg.includes("Failed to fetch") ||
+           errorMsg.includes("Server unreachable") ||
+           error instanceof TypeError)
         ) {
           console.log("⏳ Retrying in 2 seconds...");
           setTimeout(() => fetchItems(retryCount + 1), 2000);
@@ -88,18 +102,33 @@ export default function Items() {
       try {
         const response = await fetch("/api/items/migrate/add-gs1", {
           method: "POST",
+          signal: AbortSignal.timeout(15000),
         });
+
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
         if (response.ok) {
           const result = await response.json();
           console.log("✅ GS1 migration completed:", result);
+        } else if (response.status === 404) {
+          console.log("ℹ️ GS1 migration endpoint not available (might be first install)");
         }
       } catch (error) {
-        console.error("GS1 migration failed (non-critical):", error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        // Silently ignore network timeouts for non-critical migration
+        if (!errorMsg.includes("timeout")) {
+          console.warn("⚠️ GS1 migration skipped (non-critical):", errorMsg);
+        }
       }
     };
 
-    migrateGS1();
-  }, []);
+    // Only run migration if items are being loaded
+    if (!loading) {
+      migrateGS1();
+    }
+  }, [loading]);
 
   const handleDownload = () => {
     // Export items as CSV (Excel-compatible format)

@@ -46,7 +46,13 @@ function expressPlugin(): Plugin {
 
         // Only let Express handle /api routes
         if (url.startsWith("/api")) {
-          return app(req, res, next);
+          try {
+            return app(req, res, next);
+          } catch (error) {
+            console.error("Express handler error:", error);
+            res.statusCode = 500;
+            res.end("Internal Server Error");
+          }
         }
 
         // All other routes go to Vite
