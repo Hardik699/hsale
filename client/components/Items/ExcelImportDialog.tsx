@@ -59,7 +59,7 @@ export default function ExcelImportDialog({
         return;
       }
 
-      // Validate required columns
+      // Validate required columns (Item ID and Short Code are optional)
       const requiredColumns = [
         "Item Name",
         "Group",
@@ -74,7 +74,7 @@ export default function ExcelImportDialog({
 
       if (missingColumns.length > 0) {
         setError(
-          `Missing required columns: ${missingColumns.join(", ")}\n\nRequired: ${requiredColumns.join(", ")}`
+          `Missing required columns: ${missingColumns.join(", ")}\n\nRequired: ${requiredColumns.join(", ")}\n\nOptional: Item ID, Short Code (will be auto-generated if not provided)`
         );
         return;
       }
@@ -176,16 +176,36 @@ export default function ExcelImportDialog({
       let failCount = 0;
 
       // Create items one by one
-      for (const item of parsedItems) {
+      for (let index = 0; index < parsedItems.length; index++) {
         try {
-          // Generate unique item ID
-          const itemId = `${item.group.substring(0, 3).toUpperCase()}-${item.shortCode || item.itemName.substring(0, 3).toUpperCase()}-${Date.now()}`.toUpperCase();
+          const item = parsedItems[index];
+
+          // Auto-generate Item ID if not provided
+          let itemId = item.shortCode || "";
+          if (!itemId) {
+            const groupPrefix = item.group.substring(0, 3).toUpperCase();
+            const namePrefix = item.itemName.substring(0, 3).toUpperCase();
+            const timestamp = Date.now();
+            const counter = String(index).padStart(3, "0");
+            itemId = `${groupPrefix}-${namePrefix}-${timestamp}-${counter}`;
+          }
+
+          // Auto-generate Short Code if not provided
+          let shortCode = item.shortCode || "";
+          if (!shortCode) {
+            // Generate from first letters of item name
+            const words = item.itemName.split(/\s+/);
+            shortCode = words.map(w => w[0]).join("").toUpperCase();
+            if (shortCode.length < 2) {
+              shortCode = item.itemName.substring(0, 3).toUpperCase();
+            }
+          }
 
           // Convert variations to item variations with channels
-          const variations = item.variations.map((v) => {
+          const variations = item.variations.map((v, vIdx) => {
             const autoPrices = calculateAutoPrices(v.price);
             return {
-              id: `${Date.now()}-${Math.random()}`,
+              id: `var-${Date.now()}-${index}-${vIdx}`,
               name: v.name,
               value: v.value,
               price: v.price,
@@ -207,7 +227,7 @@ export default function ExcelImportDialog({
           const itemToCreate = {
             itemId,
             itemName: item.itemName,
-            shortCode: item.shortCode || "",
+            shortCode: shortCode,
             description: item.description || "",
             hsnCode: item.hsnCode || "",
             group: item.group,
@@ -267,11 +287,10 @@ export default function ExcelImportDialog({
   const downloadTemplate = () => {
     const template = [
       {
-        "Item Name": "Sample Item",
-        "Group": "Group A",
-        "Category": "Category 1",
-        "Short Code": "SI",
-        "Description": "Description here",
+        "Item Name": "Anjeer Roll",
+        "Group": "Sweets",
+        "Category": "Dry Fruits",
+        "Description": "Premium dry fruit roll",
         "HSN Code": "1234",
         "Unit Type": "Single Count",
         "Sale Type": "QTY",
@@ -284,11 +303,10 @@ export default function ExcelImportDialog({
         "SAP Code": "SAP001",
       },
       {
-        "Item Name": "Sample Item",
-        "Group": "Group A",
-        "Category": "Category 1",
-        "Short Code": "SI",
-        "Description": "Description here",
+        "Item Name": "Anjeer Roll",
+        "Group": "Sweets",
+        "Category": "Dry Fruits",
+        "Description": "Premium dry fruit roll",
         "HSN Code": "1234",
         "Unit Type": "Single Count",
         "Sale Type": "QTY",
@@ -300,9 +318,49 @@ export default function ExcelImportDialog({
         "Base Price": "180",
         "SAP Code": "SAP002",
       },
+      {
+        "Item Name": "Kaju Barfi",
+        "Group": "Sweets",
+        "Category": "Traditional",
+        "Description": "Hand-made kaju barfi",
+        "HSN Code": "5678",
+        "Unit Type": "Single Count",
+        "Sale Type": "QTY",
+        "Profit Margin": "25",
+        "GST": "5",
+        "Item Type": "Goods",
+        "Variation Name": "Weight",
+        "Variation Value": "500 Gms",
+        "Base Price": "250",
+        "SAP Code": "SAP003",
+      },
+      {
+        "Item Name": "Kaju Barfi",
+        "Group": "Sweets",
+        "Category": "Traditional",
+        "Description": "Hand-made kaju barfi",
+        "HSN Code": "5678",
+        "Unit Type": "Single Count",
+        "Sale Type": "QTY",
+        "Profit Margin": "25",
+        "GST": "5",
+        "Item Type": "Goods",
+        "Variation Name": "Weight",
+        "Variation Value": "1 KG",
+        "Base Price": "450",
+        "SAP Code": "SAP004",
+      },
     ];
 
     const ws = XLSX.utils.json_to_sheet(template);
+    ws.A1.f = "Item Name (Required)";
+    ws.B1.f = "Group (Required)";
+    ws.C1.f = "Category (Required)";
+
+    // Set column widths
+    const colWidths = [20, 15, 20, 25, 12, 15, 12, 15, 8, 12, 20, 15, 12, 15];
+    ws["!cols"] = colWidths.map(w => ({ wch: w }));
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Items");
     XLSX.writeFile(wb, "item-import-template.xlsx");
@@ -334,6 +392,11 @@ export default function ExcelImportDialog({
                 <p className="text-gray-500 text-sm mb-4">
                   Supported format: .xlsx, .xls
                 </p>
+                <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                  <p className="text-blue-300 text-xs">
+                    💡 <strong>Pro Tip:</strong> Item ID and Short Code are auto-generated. Just provide Item Name, Group, Category, and variation details.
+                  </p>
+                </div>
                 <input
                   type="file"
                   accept=".xlsx,.xls"
@@ -391,7 +454,7 @@ export default function ExcelImportDialog({
               )}
 
               <div>
-                <p className="text-gray-300 font-medium mb-3">Preview (First 5 rows)</p>
+                <p className="text-gray-300 font-medium mb-3">Preview (First 5 rows) - Item ID & Short Code will be auto-generated</p>
                 <div className="max-h-64 overflow-y-auto">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0">
