@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
-import { Plus, Download, Search } from "lucide-react";
+import { Plus, Download, Search, FileUp } from "lucide-react";
 import ItemForm from "@/components/Items/ItemForm";
 import ItemsTable from "@/components/Items/ItemsTable";
+import ExcelImportDialog from "@/components/Items/ExcelImportDialog";
 
 export default function Items() {
   const [showForm, setShowForm] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -73,6 +75,11 @@ export default function Items() {
     // Just add it to the local state for immediate UI update
     setItems([...items, newItem]);
     setShowForm(false);
+  };
+
+  const handleImportItems = (newItems: any[]) => {
+    // Add imported items to the local state
+    setItems([...items, ...newItems]);
   };
 
   // Migrate existing items to add GS1 channel (runs once on mount)
@@ -222,6 +229,16 @@ export default function Items() {
               </button>
             )}
             <button
+              onClick={() => setShowImportDialog(true)}
+              disabled={loading}
+              className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-purple-600/20 to-purple-600/10 border border-purple-600/50 text-purple-300 hover:text-purple-200 rounded-xl hover:from-purple-600/30 hover:to-purple-600/20 hover:border-purple-500/60 font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-purple-600/20 hover:shadow-xl hover:shadow-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
+              <FileUp className="w-4 h-4 xs:w-4.5 xs:h-4.5 relative z-10" />
+              <span className="hidden xs:inline relative z-10">Import Excel</span>
+              <span className="xs:hidden relative z-10">Import</span>
+            </button>
+            <button
               onClick={() => setShowForm(true)}
               disabled={loading}
               className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-blue-600/40 hover:shadow-xl hover:shadow-blue-500/60 hover:scale-[1.02] group relative overflow-hidden"
@@ -259,6 +276,14 @@ export default function Items() {
             />
           </div>
         </div>
+      )}
+
+      {/* Excel Import Modal */}
+      {showImportDialog && (
+        <ExcelImportDialog
+          onClose={() => setShowImportDialog(false)}
+          onSuccess={handleImportItems}
+        />
       )}
 
       {/* Search bar - Mobile only */}

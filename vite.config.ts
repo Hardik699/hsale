@@ -9,6 +9,11 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
     hmr: false, // Disable hot module replacement to prevent auto-refresh
+    watch: {
+      ignored: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
+      usePolling: false,
+    },
+    middlewareMode: false,
     fs: {
       allow: ["./client", "./shared"],
       deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "server/**"],
