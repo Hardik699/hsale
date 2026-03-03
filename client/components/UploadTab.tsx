@@ -161,17 +161,18 @@ export default function UploadTab({ type }: UploadTabProps) {
     reader.readAsArrayBuffer(file);
   };
 
-  const simulateProgress = (duration: number = 2000) => {
+  const simulateProgress = (duration: number = 3000) => {
     setUploadProgress(0);
     const startTime = Date.now();
     const interval = setInterval(() => {
       const elapsed = Date.now() - startTime;
-      const progress = Math.min((elapsed / duration) * 100, 95);
+      // Use a curve that progresses faster initially then slows down
+      const progress = Math.min((elapsed / duration) * 100, 90);
       setUploadProgress(Math.round(progress));
       if (elapsed >= duration) {
         clearInterval(interval);
       }
-    }, 100);
+    }, 200);
   };
 
   const validateData = async (fullData: any[]) => {
@@ -208,7 +209,10 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`Starting validation for ${minimalData.length - 1} rows (minimal payload)`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for validation
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for validation
+
+      // Show that validation is in progress
+      setMessage({ type: "warning", text: "Validating data... This may take a moment for large files." });
 
       const response = await fetch("/api/upload/validate", {
         method: "POST",
@@ -262,20 +266,26 @@ export default function UploadTab({ type }: UploadTabProps) {
       } else {
         setValidationResult(null);
         setSelectedValidRowIndices([]);
-        setMessage(null);
+        setMessage({ type: "success", text: "All rows validated successfully! Ready to upload." });
       }
       setIsValidating(false);
     } catch (error) {
       console.error("Validation error:", error);
       if (error instanceof Error && error.name === "AbortError") {
-        setMessage({ type: "error", text: "Validation took too long. The server might be busy. Please try again." });
+        setMessage({
+          type: "error",
+          text: "Validation took too long - file might be too large. Try uploading without validation or split into smaller batches."
+        });
       } else if (error instanceof TypeError && error.message === "Failed to fetch") {
         setMessage({
           type: "error",
-          text: "Connection failed during validation. This could be due to a large file or server timeout. Try refreshing the page."
+          text: "Connection failed during validation. Check your internet connection and try again."
         });
       } else {
-        setMessage({ type: "error", text: `Failed to validate data: ${error instanceof Error ? error.message : "Unknown error"}` });
+        setMessage({
+          type: "error",
+          text: `Validation failed: ${error instanceof Error ? error.message : "Unknown error"}. You can still try uploading without validation.`
+        });
       }
       setIsValidating(false);
     }
@@ -289,11 +299,11 @@ export default function UploadTab({ type }: UploadTabProps) {
 
     setIsLoading(true);
     setUploadProgress(0);
-    setMessage(null);
-    simulateProgress(2000);
+    setMessage({ type: "warning", text: `Uploading ${fileData.rows} rows... Please wait.` });
+    simulateProgress(5000);
 
     try {
-      console.log("Starting upload for", type, selectedYear, selectedMonth);
+      console.log("Starting upload for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
       // Prepare upload body
       const uploadBody: any = {
@@ -311,7 +321,9 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout for upload
+      // Increase timeout based on file size: 1 second per 100 rows, minimum 5 minutes, maximum 15 minutes
+      const estimatedTimeMs = Math.max(300000, Math.min(900000, (fileData.rows / 100) * 1000));
+      const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
 
       const response = await fetch("/api/upload", {
         method: "POST",
@@ -393,11 +405,11 @@ export default function UploadTab({ type }: UploadTabProps) {
 
     setIsUpdatingExisting(true);
     setUploadProgress(0);
-    setMessage(null);
-    simulateProgress(2000);
+    setMessage({ type: "warning", text: `Updating ${fileData.rows} rows... Please wait.` });
+    simulateProgress(5000);
 
     try {
-      console.log("Updating existing data for", type, selectedYear, selectedMonth);
+      console.log("Updating existing data for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
       // Prepare update body
       const updateBody: any = {
@@ -415,7 +427,9 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout for update
+      // Increase timeout based on file size: 1 second per 100 rows, minimum 5 minutes, maximum 15 minutes
+      const estimatedTimeMs = Math.max(300000, Math.min(900000, (fileData.rows / 100) * 1000));
+      const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
 
       const response = await fetch("/api/upload", {
         method: "PUT",
