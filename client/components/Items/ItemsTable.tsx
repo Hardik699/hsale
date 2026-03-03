@@ -1,7 +1,7 @@
 import { useState } from "react";
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 
 const CHANNELS = ["Dining", "Parcale", "Swiggy", "Zomato"];
 
@@ -28,9 +28,11 @@ const calculateAutoPrices = (basePrice: number) => {
 
 interface ItemsTableProps {
   items: any[];
+  onDelete?: (itemId: string) => void;
+  onSelectedChange?: (selectedIds: Set<string>) => void;
 }
 
-export default function ItemsTable({ items }: ItemsTableProps) {
+export default function ItemsTable({ items, onDelete, onSelectedChange }: ItemsTableProps) {
   const navigate = useNavigate();
   const [itemsPerPage, setItemsPerPage] = useState(15);
   const [currentPage, setCurrentPage] = useState(0);
@@ -92,14 +94,18 @@ export default function ItemsTable({ items }: ItemsTableProps) {
       newSelected.add(itemId);
     }
     setSelectedRows(newSelected);
+    onSelectedChange?.(newSelected);
   };
 
   const toggleSelectAll = () => {
+    let newSelected: Set<string>;
     if (selectedRows.size === paginatedItems.length) {
-      setSelectedRows(new Set());
+      newSelected = new Set();
     } else {
-      setSelectedRows(new Set(paginatedItems.map((item) => item.itemId)));
+      newSelected = new Set(paginatedItems.map((item) => item.itemId));
     }
+    setSelectedRows(newSelected);
+    onSelectedChange?.(newSelected);
   };
 
   if (items.length === 0) {
@@ -143,6 +149,9 @@ export default function ItemsTable({ items }: ItemsTableProps) {
                 </th>
                 <th rowSpan={3} className="px-3 sm:px-4 py-3 text-center border-r border-slate-700/40 bg-slate-900/60">
                   Category
+                </th>
+                <th rowSpan={3} className="px-2 py-3 text-center border-r border-slate-700/40 bg-slate-900/60 w-10">
+                  Action
                 </th>
                 {uniqueVariationValues.length > 0 && (
                   <th colSpan={uniqueVariationValues.length * 4} className="px-4 py-3 text-center bg-blue-900/30 border-b border-blue-500/20 font-bold text-blue-100">
@@ -204,6 +213,17 @@ export default function ItemsTable({ items }: ItemsTableProps) {
 
                   <td className="px-3 sm:px-4 py-3 text-gray-300 text-center border-r border-slate-700/40 text-xs">
                     {item.category}
+                  </td>
+
+                  {/* Delete Button */}
+                  <td className="px-2 py-3 text-center border-r border-slate-700/40" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => onDelete?.(item.itemId)}
+                      className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded transition-all opacity-0 group-hover:opacity-100"
+                      title="Delete item"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </td>
 
                   {/* Prices */}

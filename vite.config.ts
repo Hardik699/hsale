@@ -8,6 +8,12 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    hmr: false, // Disable hot module replacement to prevent auto-refresh
+    watch: {
+      ignored: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
+      usePolling: false,
+    },
+    middlewareMode: false,
     fs: {
       allow: ["./client", "./shared"],
       deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "server/**"],
@@ -40,7 +46,13 @@ function expressPlugin(): Plugin {
 
         // Only let Express handle /api routes
         if (url.startsWith("/api")) {
-          return app(req, res, next);
+          try {
+            return app(req, res, next);
+          } catch (error) {
+            console.error("Express handler error:", error);
+            res.statusCode = 500;
+            res.end("Internal Server Error");
+          }
         }
 
         // All other routes go to Vite

@@ -1,13 +1,17 @@
 import { useState, useEffect, useMemo } from "react";
-import { Plus, Download, Search } from "lucide-react";
+import { Plus, Download, Search, FileUp, Trash2 } from "lucide-react";
 import ItemForm from "@/components/Items/ItemForm";
 import ItemsTable from "@/components/Items/ItemsTable";
+import ExcelImportDialog from "@/components/Items/ExcelImportDialog";
 
 export default function Items() {
   const [showForm, setShowForm] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   // Filter items based on search term
   const filteredItems = useMemo(() => {
@@ -75,6 +79,74 @@ export default function Items() {
     setShowForm(false);
   };
 
+  const handleImportItems = (newItems: any[]) => {
+    // Add imported items to the local state
+    setItems([...items, ...newItems]);
+  };
+
+  const handleDeleteItem = async (itemId: string) => {
+    if (!confirm(`Are you sure you want to delete this item?`)) return;
+
+    try {
+      const response = await fetch(`/api/items/${itemId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setItems(items.filter((item) => item.itemId !== itemId));
+        console.log(`✅ Item ${itemId} deleted successfully`);
+      } else {
+        console.error("Failed to delete item");
+      }
+    } catch (error) {
+      console.error("Error deleting item:", error);
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedItems.size === 0) return;
+
+    const count = selectedItems.size;
+    if (!confirm(`Delete ${count} item${count !== 1 ? "s" : ""}? This action cannot be undone.`)) return;
+
+    setDeleting(true);
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const itemId of selectedItems) {
+        try {
+          const response = await fetch(`/api/items/${itemId}`, {
+            method: "DELETE",
+          });
+
+          if (response.ok) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (error) {
+          failCount++;
+          console.error(`Error deleting item ${itemId}:`, error);
+        }
+      }
+
+      // Remove deleted items from local state
+      const newItems = items.filter((item) => !selectedItems.has(item.itemId));
+      setItems(newItems);
+      setSelectedItems(new Set());
+
+      if (successCount > 0) {
+        console.log(`✅ Deleted ${successCount} item${successCount !== 1 ? "s" : ""}`);
+      }
+      if (failCount > 0) {
+        console.error(`❌ Failed to delete ${failCount} item${failCount !== 1 ? "s" : ""}`);
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Migrate existing items to add GS1 channel (runs once on mount)
   useEffect(() => {
     const migrateGS1 = async () => {
@@ -103,6 +175,122 @@ export default function Items() {
     a.href = url;
     a.download = "items.csv";
     a.click();
+  };
+
+  const downloadTemplateWithDropdowns = async () => {
+    try {
+      // Import XLSX dynamically
+      const XLSX = (await import("xlsx")).default;
+
+      // Get all unique variations from existing items
+      const allVariationNames = Array.from(
+        new Set(items.flatMap((item) => item.variations?.map((v: any) => v.name) || []))
+      ).sort();
+
+      const allVariationValues = Array.from(
+        new Set(items.flatMap((item) => item.variations?.map((v: any) => v.value) || []))
+      ).sort((a, b) => {
+        const parseNum = (s: string) => {
+          const n = parseFloat(s.match(/\d+/)?.[0] || "0");
+          if (s.toLowerCase().includes("kg") || s.toLowerCase().includes("l")) return n * 1000;
+          return n;
+        };
+        return parseNum(a) - parseNum(b);
+      });
+
+      // Create template data
+      const templateData = [
+        {
+          "Item Name": "Example Item",
+          "Group": "Group A",
+          "Category": "Category 1",
+          "Description": "Item description",
+          "HSN Code": "1234",
+          "Unit Type": "Single Count",
+          "Sale Type": "QTY",
+          "Profit Margin": "20",
+          "GST": "5",
+          "Item Type": "Goods",
+          "Variation Name": allVariationNames[0] || "Size",
+          "Variation Value": allVariationValues[0] || "250 Gms",
+          "Base Price": "100",
+          "SAP Code": "SAP001",
+        },
+      ];
+
+      const ws = XLSX.utils.json_to_sheet(templateData);
+
+      // Add data validation (dropdowns) for Variation Name (Column K)
+      if (!ws["!dataValidation"]) ws["!dataValidation"] = [];
+
+      const variationNameValidation = {
+        type: "list",
+        formula1: `"${allVariationNames.join(",")}"`,
+        showInputMessage: true,
+        prompt: "Select a variation name from the list",
+        sqref: "K2:K1000",
+      };
+
+      const variationValueValidation = {
+        type: "list",
+        formula1: `"${allVariationValues.join(",")}"`,
+        showInputMessage: true,
+        prompt: "Select a variation value from the list",
+        sqref: "L2:L1000",
+      };
+
+      ws["!dataValidation"].push(variationNameValidation);
+      ws["!dataValidation"].push(variationValueValidation);
+
+      // Set column widths
+      const colWidths = [20, 15, 20, 25, 12, 15, 12, 15, 8, 12, 20, 15, 12, 15];
+      ws["!cols"] = colWidths.map((w) => ({ wch: w }));
+
+      // Style header row (optional - basic styling)
+      const headerStyle = {
+        font: { bold: true, color: "FFFFFF" },
+        fill: { fgColor: { rgb: "366092" } },
+        alignment: { horizontal: "center" },
+      };
+
+      // Create workbook and add sheet
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Items");
+
+      // Create info sheet with instructions
+      const infoData = [
+        ["Instructions for using this Excel template:"],
+        [],
+        ["1. Item Name (Required)", "Enter the name of the new item"],
+        ["2. Group (Required)", "Select from existing groups"],
+        ["3. Category (Required)", "Select from existing categories"],
+        ["4. Variation Name (Required)", "Click dropdown to select existing variation"],
+        ["5. Variation Value (Required)", "Click dropdown to select existing variation value"],
+        ["6. Base Price (Required)", "Enter the base price"],
+        ["7. SAP Code (Required)", "Enter SAP code for the variation"],
+        [],
+        ["Available Variations:"],
+      ];
+
+      // Add list of variations
+      allVariationNames.forEach((name) => {
+        const values = items
+          .filter((item) => item.variations?.some((v: any) => v.name === name))
+          .flatMap((item) => item.variations.filter((v: any) => v.name === name).map((v: any) => v.value));
+        const uniqueValues = Array.from(new Set(values));
+        infoData.push([`${name}:`, uniqueValues.join(", ")]);
+      });
+
+      const infoWs = XLSX.utils.aoa_to_sheet(infoData);
+      infoWs["!cols"] = [{ wch: 30 }, { wch: 50 }];
+      XLSX.utils.book_append_sheet(wb, infoWs, "Instructions");
+
+      XLSX.writeFile(wb, "item-import-template-with-dropdowns.xlsx");
+      console.log("✅ Template with dropdowns downloaded successfully");
+    } catch (error) {
+      console.error("Error downloading template:", error);
+      alert("Failed to download template. Please try again.");
+    }
   };
 
   const convertToCSV = (data: any[]) => {
@@ -191,6 +379,18 @@ export default function Items() {
 
           {/* Action Buttons */}
           <div className="flex flex-col xs:flex-row gap-3 w-full sm:w-auto">
+            {selectedItems.size > 0 && (
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deleting}
+                className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-red-600/20 to-red-600/10 border border-red-600/50 text-red-300 hover:text-red-200 rounded-xl hover:from-red-600/30 hover:to-red-600/20 hover:border-red-500/60 font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-red-600/20 hover:shadow-xl hover:shadow-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
+                <Trash2 className="w-4 h-4 xs:w-4.5 xs:h-4.5 relative z-10" />
+                <span className="hidden xs:inline relative z-10">Delete ({selectedItems.size})</span>
+                <span className="xs:hidden relative z-10">Delete</span>
+              </button>
+            )}
             {items.length > 0 && !loading && (
               <button
                 onClick={handleDownload}
@@ -201,6 +401,28 @@ export default function Items() {
                 <span className="hidden xs:inline relative z-10">Download</span>
               </button>
             )}
+            {items.length > 0 && !loading && (
+              <button
+                onClick={downloadTemplateWithDropdowns}
+                className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-cyan-600/20 to-cyan-600/10 border border-cyan-600/50 text-cyan-300 hover:text-cyan-200 rounded-xl hover:from-cyan-600/30 hover:to-cyan-600/20 hover:border-cyan-500/60 font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-cyan-600/20 hover:shadow-xl hover:shadow-cyan-500/30 group relative overflow-hidden"
+                title="Download template with variation dropdowns"
+              >
+                <div className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
+                <Download className="w-4 h-4 xs:w-4.5 xs:h-4.5 relative z-10" />
+                <span className="hidden xs:inline relative z-10">Template</span>
+                <span className="xs:hidden relative z-10">Template</span>
+              </button>
+            )}
+            <button
+              onClick={() => setShowImportDialog(true)}
+              disabled={loading}
+              className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-purple-600/20 to-purple-600/10 border border-purple-600/50 text-purple-300 hover:text-purple-200 rounded-xl hover:from-purple-600/30 hover:to-purple-600/20 hover:border-purple-500/60 font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-purple-600/20 hover:shadow-xl hover:shadow-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
+              <FileUp className="w-4 h-4 xs:w-4.5 xs:h-4.5 relative z-10" />
+              <span className="hidden xs:inline relative z-10">Import Excel</span>
+              <span className="xs:hidden relative z-10">Import</span>
+            </button>
             <button
               onClick={() => setShowForm(true)}
               disabled={loading}
@@ -239,6 +461,14 @@ export default function Items() {
             />
           </div>
         </div>
+      )}
+
+      {/* Excel Import Modal */}
+      {showImportDialog && (
+        <ExcelImportDialog
+          onClose={() => setShowImportDialog(false)}
+          onSuccess={handleImportItems}
+        />
       )}
 
       {/* Search bar - Mobile only */}
@@ -283,7 +513,11 @@ export default function Items() {
           </div>
         </div>
       ) : (
-        <ItemsTable items={filteredItems} />
+        <ItemsTable
+          items={filteredItems}
+          onDelete={handleDeleteItem}
+          onSelectedChange={setSelectedItems}
+        />
       )}
     </div>
   );

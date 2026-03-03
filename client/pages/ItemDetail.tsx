@@ -54,6 +54,15 @@ export default function ItemDetail() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
 
+  // Comparison mode
+  const [comparisonMode, setComparisonMode] = useState(false);
+  const [comparisonDateRange, setComparisonDateRange] = useState(() => {
+    const endDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const startDate = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    return { start: startDate, end: endDate };
+  });
+  const [comparisonSalesData, setComparisonSalesData] = useState<any>(null);
+
   // Debug logging
   console.log("🔧 ItemDetail mounted, params:", params, "itemId:", itemId);
 
@@ -356,6 +365,79 @@ export default function ItemDetail() {
       // Don't abort the controller during cleanup to avoid AbortError
     };
   }, [itemId, dateRange, selectedRestaurant]);
+
+  // Fetch comparison sales data when comparison mode is enabled
+  useEffect(() => {
+    if (!comparisonMode || !itemId) {
+      setComparisonSalesData(null);
+      return;
+    }
+
+    let isMounted = true;
+    const controller = new AbortController();
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isCleanup = false;
+
+    const fetchComparisonData = async (retryCount = 0) => {
+      try {
+        if (isMounted && retryCount === 0) setSalesLoading(true);
+        const url = new URL(
+          `/api/sales/item/${itemId}`,
+          window.location.origin,
+        );
+        url.searchParams.set("startDate", comparisonDateRange.start);
+        url.searchParams.set("endDate", comparisonDateRange.end);
+        if (selectedRestaurant) {
+          url.searchParams.set("restaurant", selectedRestaurant);
+        }
+
+        console.log(`🔄 Fetching comparison data (attempt ${retryCount + 1}): ${url.toString()}`);
+
+        timeoutId = setTimeout(() => {
+          if (!isCleanup) {
+            console.warn("⚠️ Comparison data fetch timeout");
+            controller.abort();
+          }
+        }, 60000);
+
+        const response = await fetch(url.toString(), {
+          signal: controller.signal,
+        });
+
+        if (timeoutId) clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          console.error(`❌ Comparison API returned ${response.status}`);
+          return;
+        }
+
+        const result = await response.json();
+        if (isMounted) {
+          setComparisonSalesData(result.data || null);
+          console.log("✅ Comparison data loaded successfully");
+        }
+      } catch (error: any) {
+        if (error.name !== "AbortError") {
+          console.error(`❌ Comparison fetch error:`, error);
+          if (retryCount < 1 && error instanceof TypeError && isMounted) {
+            setTimeout(() => fetchComparisonData(retryCount + 1), 2000);
+            return;
+          }
+        }
+        if (isMounted) setComparisonSalesData(null);
+      } finally {
+        if (isMounted && retryCount === 0) setSalesLoading(false);
+      }
+    };
+
+    fetchComparisonData();
+
+    return () => {
+      isCleanup = true;
+      isMounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [itemId, comparisonMode, comparisonDateRange, selectedRestaurant]);
 
   if (loading) {
     return (
@@ -739,29 +821,74 @@ export default function ItemDetail() {
                   </div>
 
                   {/* Date Range Selection */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-black text-gray-500 uppercase tracking-widest">
-                        Start Date
-                      </label>
-                      <input
-                        type="date"
-                        value={dateRange.start}
-                        onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                        className="px-4 py-3 rounded-xl border border-gray-800 bg-gray-950 text-white font-bold text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all hover:bg-gray-900"
-                      />
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                          Start Date
+                        </label>
+                        <input
+                          type="date"
+                          value={dateRange.start}
+                          onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                          className="px-4 py-3 rounded-xl border border-gray-800 bg-gray-950 text-white font-bold text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all hover:bg-gray-900"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                          End Date
+                        </label>
+                        <input
+                          type="date"
+                          value={dateRange.end}
+                          onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                          className="px-4 py-3 rounded-xl border border-gray-800 bg-gray-950 text-white font-bold text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all hover:bg-gray-900"
+                        />
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-black text-gray-500 uppercase tracking-widest">
-                        End Date
-                      </label>
-                      <input
-                        type="date"
-                        value={dateRange.end}
-                        onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                        className="px-4 py-3 rounded-xl border border-gray-800 bg-gray-950 text-white font-bold text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all hover:bg-gray-900"
-                      />
+
+                    {/* Comparison Toggle */}
+                    <div className="flex items-center gap-3 pt-2 border-t border-gray-800">
+                      <button
+                        onClick={() => setComparisonMode(!comparisonMode)}
+                        className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                          comparisonMode
+                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/40'
+                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                        }`}
+                      >
+                        {comparisonMode ? '📊 Compare Data' : '+ Compare'}
+                      </button>
+                      <span className="text-xs text-gray-500">Compare with another date range</span>
                     </div>
+
+                    {/* Comparison Date Range */}
+                    {comparisonMode && (
+                      <div className="grid grid-cols-2 gap-3 p-4 bg-blue-950/20 rounded-xl border border-blue-900/40">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-black text-blue-400 uppercase tracking-widest">
+                            Compare Start Date
+                          </label>
+                          <input
+                            type="date"
+                            value={comparisonDateRange.start}
+                            onChange={(e) => setComparisonDateRange({ ...comparisonDateRange, start: e.target.value })}
+                            className="px-4 py-3 rounded-xl border border-blue-800 bg-blue-950/40 text-white font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all hover:bg-blue-950/60"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-black text-blue-400 uppercase tracking-widest">
+                            Compare End Date
+                          </label>
+                          <input
+                            type="date"
+                            value={comparisonDateRange.end}
+                            onChange={(e) => setComparisonDateRange({ ...comparisonDateRange, end: e.target.value })}
+                            className="px-4 py-3 rounded-xl border border-blue-800 bg-blue-950/40 text-white font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all hover:bg-blue-950/60"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -782,6 +909,7 @@ export default function ItemDetail() {
                     diningData={salesData.diningData}
                     parcelData={salesData.parcelData}
                     saleType={item?.variations?.[0]?.saleType || "QTY"}
+                    unitType={item?.unitType || "units"}
                   />
 
                   <div className="h-px bg-gray-800"></div>
@@ -794,7 +922,76 @@ export default function ItemDetail() {
                     swiggyData={salesData.swiggyData}
                     diningData={salesData.diningData}
                     parcelData={salesData.parcelData}
+                    unitType={item?.unitType || "units"}
+                    comparisonMode={comparisonMode}
+                    comparisonMonthlyData={comparisonSalesData?.monthlyData}
+                    comparisonDateWiseData={comparisonSalesData?.dateWiseData}
+                    comparisonRestaurantSales={comparisonSalesData?.restaurantSales}
+                    dateRange={dateRange}
+                    comparisonDateRange={comparisonDateRange}
                   />
+
+                  {/* Comparison Summary */}
+                  {comparisonMode && comparisonSalesData && (
+                    <>
+                      <div className="h-px bg-gray-800"></div>
+
+                      <div className="space-y-8">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h2 className="text-2xl font-black text-white tracking-tight">Data Comparison</h2>
+                            <p className="text-gray-400 text-sm mt-1">
+                              Comparing {dateRange.start} to {dateRange.end} vs {comparisonDateRange.start} to {comparisonDateRange.end}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          {[
+                            { label: 'Zomato', current: salesData.zomatoData.quantity, comparison: comparisonSalesData.zomatoData.quantity },
+                            { label: 'Swiggy', current: salesData.swiggyData.quantity, comparison: comparisonSalesData.swiggyData.quantity },
+                            { label: 'Dining', current: salesData.diningData.quantity, comparison: comparisonSalesData.diningData.quantity },
+                            { label: 'Parcel', current: salesData.parcelData.quantity, comparison: comparisonSalesData.parcelData.quantity },
+                          ].map((channel) => {
+                            const change = channel.current - channel.comparison;
+                            const percentChange = channel.comparison > 0 ? ((change / channel.comparison) * 100) : (channel.current > 0 ? 100 : 0);
+                            const isPositive = change >= 0;
+
+                            return (
+                              <div key={channel.label} className="bg-gray-900/40 border border-gray-800 rounded-xl p-4 hover:border-gray-700 transition-all">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h3 className="font-bold text-white">{channel.label}</h3>
+                                  <div className={`text-sm font-bold px-3 py-1 rounded-lg ${
+                                    isPositive
+                                      ? 'bg-emerald-500/20 text-emerald-400'
+                                      : 'bg-red-500/20 text-red-400'
+                                  }`}>
+                                    {isPositive ? '+' : ''}{percentChange.toFixed(1)}%
+                                  </div>
+                                </div>
+                                <div className="space-y-2 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Period 1:</span>
+                                    <span className="text-white font-semibold">{channel.current.toLocaleString()} {item?.unitType || 'units'}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Period 2:</span>
+                                    <span className="text-white font-semibold">{channel.comparison.toLocaleString()} {item?.unitType || 'units'}</span>
+                                  </div>
+                                  <div className="flex justify-between pt-2 border-t border-gray-700">
+                                    <span className="text-gray-400">Difference:</span>
+                                    <span className={`font-semibold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                                      {isPositive ? '+' : ''}{change.toLocaleString()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                 </div>
               ) : (
