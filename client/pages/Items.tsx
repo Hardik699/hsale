@@ -35,8 +35,12 @@ export default function Items() {
       try {
         setLoading(true);
         console.log(`🔄 Fetching items (attempt ${retryCount + 1})...`);
+        console.log(`📍 Fetching from: ${window.location.origin}/api/items`);
 
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        const timeoutId = setTimeout(() => {
+          console.log("⏱️ Fetch timeout after 30 seconds");
+          controller.abort();
+        }, 30000); // 30 second timeout
 
         const response = await fetch("/api/items", {
           signal: controller.signal,
@@ -53,6 +57,11 @@ export default function Items() {
         setItems(Array.isArray(data) ? data : []);
       } catch (error: any) {
         console.error("❌ Failed to fetch items:", error);
+        console.error("Error details:", {
+          name: error.name,
+          message: error.message,
+          stack: error.stack?.split("\n").slice(0, 3).join("\n"),
+        });
 
         // Retry once after 3 seconds if it's a network error or timeout
         if (retryCount < 1) {
@@ -151,15 +160,25 @@ export default function Items() {
   useEffect(() => {
     const migrateGS1 = async () => {
       try {
+        console.log("🔄 Starting GS1 migration...");
+        console.log(`📍 POST to: ${window.location.origin}/api/items/migrate/add-gs1`);
+
         const response = await fetch("/api/items/migrate/add-gs1", {
           method: "POST",
         });
+
         if (response.ok) {
           const result = await response.json();
           console.log("✅ GS1 migration completed:", result);
+        } else {
+          console.warn(`⚠️ Migration returned status ${response.status}: ${response.statusText}`);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("GS1 migration failed (non-critical):", error);
+        console.error("Migration error details:", {
+          name: error.name,
+          message: error.message,
+        });
       }
     };
 
