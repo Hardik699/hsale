@@ -73,10 +73,16 @@ export function createServer() {
   app.use(express.json({ limit: "200mb" }));
   app.use(express.urlencoded({ extended: true, limit: "200mb" }));
 
-  // Increase timeout for large uploads (5 minutes = 300 seconds)
+  // Set socket timeout to 15 minutes before any other middleware
   app.use((req, res, next) => {
-    req.setTimeout(300000);
-    res.setTimeout(300000);
+    req.socket.setTimeout(900000); // 15 minutes
+    next();
+  });
+
+  // Increase timeout for large uploads (15 minutes = 900 seconds)
+  app.use((req, res, next) => {
+    req.setTimeout(900000);
+    res.setTimeout(900000);
     next();
   });
 

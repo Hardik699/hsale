@@ -310,11 +310,17 @@ export default function UploadTab({ type }: UploadTabProps) {
         uploadBody.validRowIndices = selectedValidRowIndices;
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout for upload
+
       const response = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(uploadBody)
+        body: JSON.stringify(uploadBody),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       console.log("Upload response status:", response.status);
 
@@ -365,6 +371,11 @@ export default function UploadTab({ type }: UploadTabProps) {
           type: "error",
           text: "Cannot connect to server. Please check your internet connection and try again."
         });
+      } else if (error instanceof Error && error.name === "AbortError") {
+        setMessage({
+          type: "error",
+          text: "Upload took too long and was cancelled. The file is very large or your connection is slow. Please try again with a smaller file or better connection."
+        });
       } else {
         setMessage({
           type: "error",
@@ -403,11 +414,17 @@ export default function UploadTab({ type }: UploadTabProps) {
         updateBody.validRowIndices = selectedValidRowIndices;
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout for update
+
       const response = await fetch("/api/upload", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updateBody)
+        body: JSON.stringify(updateBody),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       console.log("Update response status:", response.status);
 
@@ -456,6 +473,11 @@ export default function UploadTab({ type }: UploadTabProps) {
         setMessage({
           type: "error",
           text: "Cannot connect to server. Please check your internet connection and try again."
+        });
+      } else if (error instanceof Error && error.name === "AbortError") {
+        setMessage({
+          type: "error",
+          text: "Update took too long and was cancelled. The file is very large or your connection is slow. Please try again with a smaller file or better connection."
         });
       } else {
         setMessage({
