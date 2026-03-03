@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Plus, Download, Search, FileUp } from "lucide-react";
+import { Plus, Download, Search, FileUp, Trash2 } from "lucide-react";
 import ItemForm from "@/components/Items/ItemForm";
 import ItemsTable from "@/components/Items/ItemsTable";
 import ExcelImportDialog from "@/components/Items/ExcelImportDialog";
@@ -10,6 +10,8 @@ export default function Items() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   // Filter items based on search term
   const filteredItems = useMemo(() => {
@@ -80,6 +82,69 @@ export default function Items() {
   const handleImportItems = (newItems: any[]) => {
     // Add imported items to the local state
     setItems([...items, ...newItems]);
+  };
+
+  const handleDeleteItem = async (itemId: string) => {
+    if (!confirm(`Are you sure you want to delete this item?`)) return;
+
+    try {
+      const response = await fetch(`/api/items/${itemId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setItems(items.filter((item) => item.itemId !== itemId));
+        console.log(`✅ Item ${itemId} deleted successfully`);
+      } else {
+        console.error("Failed to delete item");
+      }
+    } catch (error) {
+      console.error("Error deleting item:", error);
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedItems.size === 0) return;
+
+    const count = selectedItems.size;
+    if (!confirm(`Delete ${count} item${count !== 1 ? "s" : ""}? This action cannot be undone.`)) return;
+
+    setDeleting(true);
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const itemId of selectedItems) {
+        try {
+          const response = await fetch(`/api/items/${itemId}`, {
+            method: "DELETE",
+          });
+
+          if (response.ok) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (error) {
+          failCount++;
+          console.error(`Error deleting item ${itemId}:`, error);
+        }
+      }
+
+      // Remove deleted items from local state
+      const newItems = items.filter((item) => !selectedItems.has(item.itemId));
+      setItems(newItems);
+      setSelectedItems(new Set());
+
+      if (successCount > 0) {
+        console.log(`✅ Deleted ${successCount} item${successCount !== 1 ? "s" : ""}`);
+      }
+      if (failCount > 0) {
+        console.error(`❌ Failed to delete ${failCount} item${failCount !== 1 ? "s" : ""}`);
+      }
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // Migrate existing items to add GS1 channel (runs once on mount)
@@ -198,6 +263,18 @@ export default function Items() {
 
           {/* Action Buttons */}
           <div className="flex flex-col xs:flex-row gap-3 w-full sm:w-auto">
+            {selectedItems.size > 0 && (
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deleting}
+                className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-red-600/20 to-red-600/10 border border-red-600/50 text-red-300 hover:text-red-200 rounded-xl hover:from-red-600/30 hover:to-red-600/20 hover:border-red-500/60 font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-red-600/20 hover:shadow-xl hover:shadow-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
+                <Trash2 className="w-4 h-4 xs:w-4.5 xs:h-4.5 relative z-10" />
+                <span className="hidden xs:inline relative z-10">Delete ({selectedItems.size})</span>
+                <span className="xs:hidden relative z-10">Delete</span>
+              </button>
+            )}
             {items.length > 0 && !loading && (
               <button
                 onClick={handleDownload}
@@ -308,7 +385,11 @@ export default function Items() {
           </div>
         </div>
       ) : (
-        <ItemsTable items={filteredItems} />
+        <ItemsTable
+          items={filteredItems}
+          onDelete={handleDeleteItem}
+          onSelectedChange={setSelectedItems}
+        />
       )}
     </div>
   );
