@@ -97,6 +97,7 @@ export default function Items() {
     if (!confirm(`Are you sure you want to delete this item?`)) return;
 
     try {
+      console.log(`🗑️ Deleting item: ${itemId}`);
       const response = await fetch(`/api/items/${itemId}`, {
         method: "DELETE",
       });
@@ -105,10 +106,21 @@ export default function Items() {
         setItems(items.filter((item) => item.itemId !== itemId));
         console.log(`✅ Item ${itemId} deleted successfully`);
       } else {
-        console.error("Failed to delete item");
+        const errorData = await response.json().catch(() => ({}));
+        console.error(`❌ Failed to delete item ${itemId}:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData.error || "Unknown error",
+          details: errorData.details || "",
+        });
+        alert(`Failed to delete item: ${errorData.error || "Unknown error"}`);
       }
-    } catch (error) {
-      console.error("Error deleting item:", error);
+    } catch (error: any) {
+      console.error(`❌ Error deleting item ${itemId}:`, {
+        name: error.name,
+        message: error.message,
+      });
+      alert(`Error deleting item: ${error.message || "Unknown error"}`);
     }
   };
 
@@ -122,21 +134,32 @@ export default function Items() {
     try {
       let successCount = 0;
       let failCount = 0;
+      const failedItems: string[] = [];
 
       for (const itemId of selectedItems) {
         try {
+          console.log(`🗑️ Deleting item: ${itemId}`);
           const response = await fetch(`/api/items/${itemId}`, {
             method: "DELETE",
           });
 
           if (response.ok) {
             successCount++;
+            console.log(`✅ Successfully deleted item: ${itemId}`);
           } else {
             failCount++;
+            failedItems.push(itemId);
+            const errorData = await response.json().catch(() => ({}));
+            console.error(`❌ Failed to delete item ${itemId}:`, {
+              status: response.status,
+              statusText: response.statusText,
+              error: errorData.error || "Unknown error",
+            });
           }
         } catch (error) {
           failCount++;
-          console.error(`Error deleting item ${itemId}:`, error);
+          failedItems.push(itemId);
+          console.error(`❌ Network error deleting item ${itemId}:`, error);
         }
       }
 
@@ -149,7 +172,11 @@ export default function Items() {
         console.log(`✅ Deleted ${successCount} item${successCount !== 1 ? "s" : ""}`);
       }
       if (failCount > 0) {
-        console.error(`❌ Failed to delete ${failCount} item${failCount !== 1 ? "s" : ""}`);
+        console.error(`❌ Failed to delete ${failCount} item${failCount !== 1 ? "s" : ""}:`, {
+          failedItems,
+          details: "Check console for individual error messages",
+        });
+        alert(`Deleted ${successCount} items. Failed to delete ${failCount} items: ${failedItems.join(", ")}`);
       }
     } finally {
       setDeleting(false);

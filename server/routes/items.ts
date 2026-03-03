@@ -237,18 +237,30 @@ export const handleDeleteItem: RequestHandler = async (req, res) => {
   try {
     const { itemId } = req.params;
 
+    if (!itemId) {
+      console.error("❌ Delete request missing itemId");
+      return res.status(400).json({ error: "itemId is required" });
+    }
+
+    console.log(`🗑️ Deleting item: ${itemId}`);
+
     const collection = await getItemsCollection();
 
     const result = await collection.deleteOne({ itemId });
 
     if (result.deletedCount === 0) {
+      console.warn(`⚠️ Item ${itemId} not found for deletion`);
       return res.status(404).json({ error: "Item not found" });
     }
 
-    res.json({ message: "Item deleted successfully" });
+    console.log(`✅ Item ${itemId} deleted successfully`);
+    res.json({ message: "Item deleted successfully", deletedCount: result.deletedCount });
   } catch (error) {
-    console.error("Error deleting item:", error);
-    res.status(500).json({ error: "Failed to delete item" });
+    console.error(`❌ Error deleting item ${req.params.itemId}:`, error);
+    res.status(500).json({
+      error: "Failed to delete item",
+      details: error instanceof Error ? error.message : String(error),
+    });
   }
 };
 
