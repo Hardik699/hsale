@@ -35,18 +35,12 @@ interface SalesChartsProps {
   diningData?: any;
   parcelData?: any;
   unitType?: string;
-  comparisonMode?: boolean;
-  comparisonMonthlyData?: MonthlyData[];
-  comparisonDateWiseData?: DateWiseData[];
-  comparisonRestaurantSales?: { [key: string]: number };
-  dateRange?: { start: string; end: string };
-  comparisonDateRange?: { start: string; end: string };
 }
 
 const RESTAURANT_COLORS = [
-  "#22c55e", "#16a34a", "#84cc16", "#65a30d", "#4ade80", "#86efac",
-  "#bbf7d0", "#dcfce7", "#10b981", "#059669", "#14b8a6", "#0d9488",
-  "#06b6d4", "#0891b2", "#0e7490"
+  "#ef4444", "#f97316", "#eab308", "#84cc16", "#22c55e", "#10b981",
+  "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6",
+  "#d946ef", "#ec4899", "#f43f5e"
 ];
 
 const AREA_COLORS = {
@@ -58,74 +52,65 @@ const AREA_COLORS = {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export default function SalesCharts({
-  monthlyData,
-  dateWiseData,
-  restaurantSales = {},
-  unitType = "units",
-  comparisonMode = false,
-  comparisonMonthlyData,
-  comparisonDateWiseData,
-  comparisonRestaurantSales = {},
-  dateRange,
-  comparisonDateRange
-}: SalesChartsProps) {
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-  const [hoveredRestaurant, setHoveredRestaurant] = useState<string | null>(null);
+// Custom tooltip to show both quantity and value with variations
+const CustomMonthlyTooltip = ({ active, payload, unitType = "units" }: any) => {
+  if (active && payload && payload.length > 0) {
+    const dataPoint = payload[0]?.payload;
+    const variations = dataPoint?.variations;
 
-  // Custom tooltip to show both quantity and value with variations
-  const CustomMonthlyTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length > 0) {
-      const dataPoint = payload[0]?.payload;
-      const variations = dataPoint?.variations;
+    return (
+      <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-4 max-w-md">
+        <p className="font-bold text-white mb-3">{dataPoint?.month || "Month"}</p>
 
-      return (
-        <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-4 max-w-md">
-          <p className="font-bold text-white mb-3">{dataPoint?.month || "Month"}</p>
-
-          {/* Area-wise summary */}
-          {payload.map((entry: any, idx: number) => (
-            <p key={idx} style={{ color: entry.color }} className="text-xs font-medium text-gray-300">
-              {entry.name}: {entry.value.toLocaleString()} {unitType}
-            </p>
-          ))}
-
-          {/* Variation breakdown if available */}
-          {variations && (
-            <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
-              <p className="text-xs font-bold text-yellow-400 uppercase tracking-wider">Variation Breakdown</p>
-              {Object.entries(variations).map(([area, vars]: [string, any]) => {
-                const areaVars = Array.isArray(vars) ? vars : [];
-                if (areaVars.length === 0) return null;
-
-                return (
-                  <div key={area} className="ml-2">
-                    <p className="text-xs font-semibold text-gray-400 capitalize">{area}:</p>
-                    {areaVars.map((v: any, idx: number) => (
-                      <div key={idx} className="ml-3 text-xs text-gray-300">
-                        <div className="flex justify-between gap-4">
-                          <span>{v.name}</span>
-                          <span className="font-mono">
-                            {v.quantity.toLocaleString()} {unitType}
-                            {v.value ? ` (₹${v.value.toLocaleString()})` : ""}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <p className="text-xs font-bold text-yellow-400 mt-3 border-t border-gray-700 pt-2">
-            Total: {payload.reduce((sum: number, p: any) => sum + p.value, 0).toLocaleString()} {unitType}
+        {/* Area-wise summary */}
+        {payload.map((entry: any, idx: number) => (
+          <p key={idx} style={{ color: entry.color }} className="text-xs font-medium text-gray-300">
+            {entry.name}: {entry.value.toLocaleString()} {unitType}
           </p>
-        </div>
-      );
-    }
-    return null;
-  };
+        ))}
+
+        {/* Variation breakdown if available */}
+        {variations && (
+          <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
+            <p className="text-xs font-bold text-yellow-400 uppercase tracking-wider">Variation Breakdown</p>
+            {Object.entries(variations).map(([area, vars]: [string, any]) => {
+              const areaVars = Array.isArray(vars) ? vars : [];
+              if (areaVars.length === 0) return null;
+
+              return (
+                <div key={area} className="ml-2">
+                  <p className="text-xs font-semibold text-gray-400 capitalize">{area}:</p>
+                  {areaVars.map((v: any, idx: number) => (
+                    <div key={idx} className="ml-3 text-xs text-gray-300">
+                      <div className="flex justify-between gap-4">
+                        <span>{v.name}</span>
+                        <span className="font-mono">
+                          {v.quantity.toLocaleString()} {unitType}
+                          {v.value ? ` (₹${v.value.toLocaleString()})` : ""}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <p className="text-xs font-bold text-yellow-400 mt-3 border-t border-gray-700 pt-2">
+          Total: {payload.reduce((sum: number, p: any) => sum + p.value, 0).toLocaleString()} {unitType}
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
+
+export default function SalesCharts({ monthlyData, dateWiseData, restaurantSales = {}, unitType = "units" }: SalesChartsProps) {
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+
+  // Create tooltip component with unitType bound
+  const TooltipWithUnit = (props: any) => <CustomMonthlyTooltip {...props} unitType={unitType} />;
 
   // Create data for all 12 months (fill missing months with 0)
   const allMonthsData = MONTH_NAMES.map(month => {
@@ -200,7 +185,7 @@ export default function SalesCharts({
                 label={{ value: 'Qty', angle: -90, position: 'insideLeft', offset: 5, style: { fill: '#9ca3af', fontSize: 11 } }}
               />
               <Tooltip
-                content={<CustomMonthlyTooltip />}
+                content={<TooltipWithUnit />}
                 cursor={{ fill: "rgba(168, 85, 247, 0.08)" }}
               />
               <Legend
@@ -347,302 +332,6 @@ export default function SalesCharts({
             </ResponsiveContainer>
           </div>
 
-        </div>
-      )}
-
-      {/* Restaurant Comparison Chart - Donut */}
-      {restaurantSales && Object.keys(restaurantSales).length > 0 && (
-        <div className="bg-gradient-to-br from-slate-900 via-gray-950 to-slate-900 rounded-2xl border border-emerald-500/20 p-8 backdrop-blur-sm shadow-xl shadow-emerald-500/10">
-          <div className="flex items-center gap-3 mb-10">
-            <div className="p-3 bg-gradient-to-br from-emerald-500/30 to-green-500/20 rounded-xl border border-emerald-400/30">
-              <BarChart3 className="w-5 h-5 text-emerald-300" />
-            </div>
-            <div>
-              <h2 className="text-3xl font-black text-white tracking-tight">Restaurant Performance</h2>
-              <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">Comparative sales across restaurants</p>
-            </div>
-          </div>
-
-          {(() => {
-            const totalSales = Object.values(restaurantSales as any).reduce((a: number, b: number) => a + b, 0);
-            const sortedRestaurants = Object.entries(restaurantSales as any)
-              .sort((a, b) => (b[1] as number) - (a[1] as number));
-            const topRestaurant = sortedRestaurants[0];
-            const topRestaurantPercentage = totalSales > 0 ? ((topRestaurant[1] as number) / totalSales) * 100 : 0;
-
-            const hoveredRestaurantData = hoveredRestaurant
-              ? sortedRestaurants.find(([name]) => name === hoveredRestaurant)
-              : topRestaurant;
-
-            const hoveredPercentage = hoveredRestaurantData
-              ? totalSales > 0 ? ((hoveredRestaurantData[1] as number) / totalSales) * 100 : 0
-              : topRestaurantPercentage;
-
-            return (
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
-                {/* Donut Chart with Center Info */}
-                <div className="lg:col-span-2 flex flex-col items-center justify-center">
-                  <div className="relative w-80 h-80">
-                    {/* Glow effect background */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/20 to-transparent rounded-full blur-3xl -z-10 animate-pulse"></div>
-
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={sortedRestaurants.map(([name, value], idx) => ({
-                            name,
-                            value: value as number,
-                            fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length],
-                            isHovered: name === hoveredRestaurant
-                          }))}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={85}
-                          outerRadius={135}
-                          paddingAngle={2.5}
-                          dataKey="value"
-                          animationDuration={600}
-                          animationEasing="ease-out"
-                        >
-                          {sortedRestaurants.map((_, idx) => {
-                            const isHovered = sortedRestaurants[idx][0] === hoveredRestaurant;
-                            return (
-                              <Cell
-                                key={`cell-${idx}`}
-                                fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
-                                opacity={hoveredRestaurant ? (isHovered ? 1 : 0.4) : 0.95}
-                                style={{
-                                  filter: isHovered ? `drop-shadow(0 0 12px ${RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]})` : 'none',
-                                  transition: 'opacity 300ms ease, filter 300ms ease',
-                                  cursor: 'pointer'
-                                }}
-                              />
-                            );
-                          })}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: "#111827",
-                            border: "2px solid #22c55e",
-                            borderRadius: "12px",
-                            padding: "12px 16px",
-                            boxShadow: "0 20px 25px -5px rgba(34, 197, 94, 0.2)"
-                          }}
-                          formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
-                          labelStyle={{ color: "#fff", fontWeight: "bold" }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-
-                    {/* Center Content with Smooth Transition */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <div className="text-center transition-all duration-300">
-                        <div className="text-5xl font-black text-white mb-1">
-                          {hoveredPercentage.toFixed(1)}%
-                        </div>
-                        <div className="text-sm font-semibold text-gray-300 px-4 h-6 overflow-hidden">
-                          <div
-                            className="transition-all duration-300"
-                            key={hoveredRestaurant || 'default'}
-                          >
-                            {hoveredRestaurantData?.[0]}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Legend with Details */}
-                <div className="lg:col-span-3 flex flex-col justify-center">
-                  <div className="space-y-3">
-                    {sortedRestaurants.map(([restaurant, sales], idx) => {
-                      const percentage = totalSales > 0 ? ((sales as number) / totalSales) * 100 : 0;
-                      const color = RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length];
-                      const isHovered = hoveredRestaurant === restaurant;
-
-                      return (
-                        <div
-                          key={restaurant}
-                          onMouseEnter={() => setHoveredRestaurant(restaurant)}
-                          onMouseLeave={() => setHoveredRestaurant(null)}
-                          className={`group flex items-center justify-between p-5 rounded-xl transition-all duration-300 border backdrop-blur-sm cursor-pointer ${
-                            isHovered
-                              ? 'bg-gradient-to-r from-emerald-900/70 to-emerald-800/40 border-emerald-500/80 shadow-lg shadow-emerald-500/30'
-                              : 'bg-gradient-to-r from-emerald-950/40 to-gray-900/20 border-emerald-900/40 hover:from-emerald-900/50 hover:to-gray-900/30 hover:border-emerald-700/60'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <div
-                              className={`w-5 h-5 rounded-full flex-shrink-0 shadow-xl ring-2 transition-all duration-300 ${
-                                isHovered
-                                  ? 'ring-emerald-300/80 scale-110 shadow-lg'
-                                  : 'ring-emerald-400/30 group-hover:ring-emerald-400/60'
-                              }`}
-                              style={{
-                                backgroundColor: color,
-                                filter: isHovered ? `drop-shadow(0 0 8px ${color})` : 'none'
-                              }}
-                            ></div>
-                            <div className="flex-1 min-w-0">
-                              <span className={`text-sm font-bold block truncate transition-colors duration-300 ${
-                                isHovered
-                                  ? 'text-emerald-100'
-                                  : 'text-gray-50 group-hover:text-emerald-100'
-                              }`}>
-                                {restaurant}
-                              </span>
-                              <span className={`text-xs transition-colors duration-300 ${
-                                isHovered
-                                  ? 'text-emerald-400'
-                                  : 'text-gray-500 group-hover:text-emerald-400/70'
-                              }`}>
-                                Sales Distribution
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-6 ml-4">
-                            <div className="text-right">
-                              <div className={`text-sm font-semibold transition-colors duration-300 ${
-                                isHovered
-                                  ? 'text-emerald-100'
-                                  : 'text-gray-300 group-hover:text-emerald-100'
-                              }`}>
-                                {sales.toLocaleString()}
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                {unitType}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className={`text-2xl font-black transition-all duration-300 ${
-                                isHovered
-                                  ? 'text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 to-green-300 scale-110'
-                                  : 'text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-green-400'
-                              }`}>
-                                {percentage.toFixed(1)}%
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* Comparison Restaurant Performance */}
-      {comparisonMode && comparisonRestaurantSales && Object.keys(comparisonRestaurantSales).length > 0 && (
-        <div className="bg-gradient-to-br from-slate-900 via-gray-950 to-slate-900 rounded-2xl border border-blue-500/20 p-8 backdrop-blur-sm shadow-xl shadow-blue-500/10">
-          <div className="flex items-center gap-3 mb-10">
-            <div className="p-3 bg-gradient-to-br from-blue-500/30 to-blue-500/20 rounded-xl border border-blue-400/30">
-              <BarChart3 className="w-5 h-5 text-blue-300" />
-            </div>
-            <div>
-              <h2 className="text-3xl font-black text-white tracking-tight">Comparison: Restaurant Performance</h2>
-              <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">
-                Period 1: {dateRange?.start} to {dateRange?.end} vs Period 2: {comparisonDateRange?.start} to {comparisonDateRange?.end}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Period 1 Chart */}
-            <div>
-              <h3 className="text-lg font-bold text-white mb-4 pb-3 border-b border-gray-800">Period 1 Data</h3>
-              <div className="relative w-full h-80">
-                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent rounded-full blur-3xl -z-10 animate-pulse"></div>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={Object.entries(restaurantSales as any)
-                        .map(([name, value], idx) => ({
-                          name,
-                          value: value as number,
-                          fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
-                        }))
-                        .sort((a, b) => b.value - a.value)}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={70}
-                      outerRadius={110}
-                      paddingAngle={2}
-                      dataKey="value"
-                      animationDuration={600}
-                    >
-                      {Object.entries(restaurantSales as any).map((_, idx) => (
-                        <Cell
-                          key={`cell-${idx}`}
-                          fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
-                          opacity={0.9}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#111827",
-                        border: "2px solid #10b981",
-                        borderRadius: "12px",
-                        padding: "12px 16px",
-                      }}
-                      formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
-                      labelStyle={{ color: "#fff", fontWeight: "bold" }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Period 2 Chart */}
-            <div>
-              <h3 className="text-lg font-bold text-blue-400 mb-4 pb-3 border-b border-blue-800">Period 2 Data</h3>
-              <div className="relative w-full h-80">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent rounded-full blur-3xl -z-10 animate-pulse"></div>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={Object.entries(comparisonRestaurantSales as any)
-                        .map(([name, value], idx) => ({
-                          name,
-                          value: value as number,
-                          fill: RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]
-                        }))
-                        .sort((a, b) => b.value - a.value)}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={70}
-                      outerRadius={110}
-                      paddingAngle={2}
-                      dataKey="value"
-                      animationDuration={600}
-                    >
-                      {Object.entries(comparisonRestaurantSales as any).map((_, idx) => (
-                        <Cell
-                          key={`cell-${idx}`}
-                          fill={RESTAURANT_COLORS[idx % RESTAURANT_COLORS.length]}
-                          opacity={0.9}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#111827",
-                        border: "2px solid #3b82f6",
-                        borderRadius: "12px",
-                        padding: "12px 16px",
-                      }}
-                      formatter={(value: any) => `${(value as number).toLocaleString()} ${unitType}`}
-                      labelStyle={{ color: "#fff", fontWeight: "bold" }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 

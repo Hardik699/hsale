@@ -1,12 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
-import { Plus, Download, Search, FileUp } from "lucide-react";
+import { Plus, Download, Search } from "lucide-react";
 import ItemForm from "@/components/Items/ItemForm";
 import ItemsTable from "@/components/Items/ItemsTable";
-import ExcelImportDialog from "@/components/Items/ExcelImportDialog";
 
 export default function Items() {
   const [showForm, setShowForm] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -27,29 +25,19 @@ export default function Items() {
   // Fetch items from MongoDB on component mount
   useEffect(() => {
     const fetchItems = async (retryCount = 0) => {
+      // Create a new AbortController for each fetch attempt
+      const controller = new AbortController();
+
       try {
         setLoading(true);
         console.log(`🔄 Fetching items (attempt ${retryCount + 1})...`);
 
-        // First check if server is responding
-        try {
-          const healthCheck = await fetch("/api/health", {
-            method: "GET",
-            signal: AbortSignal.timeout(5000)
-          }).catch(() => null);
-
-          if (!healthCheck?.ok) {
-            throw new Error("Server not responding to health check");
-          }
-          console.log("✅ Server health check passed");
-        } catch (healthError) {
-          console.warn("⚠️ Health check failed:", healthError);
-          throw new Error(`Server unreachable: ${healthError instanceof Error ? healthError.message : "Unknown error"}`);
-        }
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
         const response = await fetch("/api/items", {
-          signal: AbortSignal.timeout(10000),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           throw new Error(
@@ -59,20 +47,16 @@ export default function Items() {
         const data = await response.json();
         console.log(`✅ Loaded ${data.length} items from MongoDB`);
         setItems(Array.isArray(data) ? data : []);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error("❌ Failed to fetch items:", errorMsg);
+      } catch (error: any) {
+        console.error("❌ Failed to fetch items:", error);
 
-        // Retry once after 2 seconds if it's a network error
-        if (
-          retryCount < 1 &&
-          (errorMsg.includes("Failed to fetch") ||
-           errorMsg.includes("Server unreachable") ||
-           error instanceof TypeError)
-        ) {
-          console.log("⏳ Retrying in 2 seconds...");
-          setTimeout(() => fetchItems(retryCount + 1), 2000);
-          return;
+        // Retry once after 3 seconds if it's a network error or timeout
+        if (retryCount < 1) {
+          if (error instanceof TypeError || error.name === "AbortError") {
+            console.log("⏳ Retrying in 3 seconds...");
+            setTimeout(() => fetchItems(retryCount + 1), 3000);
+            return;
+          }
         }
 
         setItems([]);
@@ -91,127 +75,87 @@ export default function Items() {
     setShowForm(false);
   };
 
-  const handleImportItems = (newItems: any[]) => {
-    // Add imported items to the local state
-    setItems([...items, ...newItems]);
-  };
-
   // Migrate existing items to add GS1 channel (runs once on mount)
   useEffect(() => {
     const migrateGS1 = async () => {
       try {
         const response = await fetch("/api/items/migrate/add-gs1", {
           method: "POST",
-          signal: AbortSignal.timeout(15000),
         });
-
-        if (!response.ok && response.status !== 404) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
         if (response.ok) {
           const result = await response.json();
           console.log("✅ GS1 migration completed:", result);
-        } else if (response.status === 404) {
-          console.log("ℹ️ GS1 migration endpoint not available (might be first install)");
         }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        // Silently ignore network timeouts for non-critical migration
-        if (!errorMsg.includes("timeout")) {
-          console.warn("⚠️ GS1 migration skipped (non-critical):", errorMsg);
-        }
+        console.error("GS1 migration failed (non-critical):", error);
       }
     };
 
-    // Only run migration if items are being loaded
-    if (!loading) {
-      migrateGS1();
-    }
-  }, [loading]);
+    migrateGS1();
+  }, []);
 
   const handleDownload = () => {
-    // Export items as CSV (Excel-compatible format)
+    // Export items as CSV/Excel
     const csv = convertToCSV(items);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([csv], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `items-${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
+    a.download = "items.csv";
     a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
   };
 
   const convertToCSV = (data: any[]) => {
     if (data.length === 0) return "";
 
-    const CHANNELS = ["Dining", "Parcel", "Swiggy", "Zomato"];
+    // Define the columns to export
+    const headers = [
+      "Item ID",
+      "Item Name",
+      "Short Code",
+      "Description",
+      "HSN Code",
+      "Group",
+      "Category",
+      "Profit Margin (%)",
+      "GST (%)",
+      "Item Type",
+      "Unit Type",
+      "Variations",
+      "Images Count",
+    ];
 
-    // Collect all unique variations across all items
-    const allVariations = Array.from(
-      new Set(
-        data.flatMap((item) =>
-          item.variations?.map((v: any) => `${v.name} - ${v.value}`) || []
-        )
-      )
-    ).sort();
+    const rows = data.map((item) => [
+      item.itemId,
+      item.itemName,
+      item.shortCode,
+      item.description || "",
+      item.hsnCode || "",
+      item.group,
+      item.category,
+      item.profitMargin || 0,
+      item.gst || 0,
+      item.itemType,
+      item.unitType,
+      item.variations?.map((v: any) => `${v.name}: ${v.value}`).join("; ") ||
+        "",
+      item.images?.length || 0,
+    ]);
 
-    // Build dynamic headers: Item Name, Group, Category, then pricing columns
-    const headers = ["Item ID", "Item Name", "Group", "Category"];
-
-    // Add pricing columns for each variation and channel
-    allVariations.forEach((variation) => {
-      CHANNELS.forEach((channel) => {
-        headers.push(`${variation} - ${channel}`);
-      });
-    });
-
-    // Helper function to escape CSV cells
-    const escapeCell = (cell: any) => {
-      const value = String(cell || "-");
-      return value.includes(",") || value.includes('"') || value.includes("\n")
-        ? `"${value.replace(/"/g, '""')}"`
-        : value;
-    };
-
-    // Build rows with pricing data
-    const rows = data.map((item) => {
-      const row = [
-        item.itemId,
-        item.itemName,
-        item.group || "",
-        item.category || "",
-      ];
-
-      // Add pricing for each variation/channel combination
-      allVariations.forEach((variation) => {
-        const [varName, varValue] = variation.split(" - ");
-        const foundVariation = item.variations?.find(
-          (v: any) => v.name === varName && v.value === varValue
-        );
-
-        CHANNELS.forEach((channel) => {
-          let price = "-";
-          if (foundVariation) {
-            // Get channel price
-            const channelPrice = foundVariation.channels?.[channel];
-            if (channelPrice && channelPrice > 0) {
-              price = channelPrice.toString();
-            }
-          }
-          row.push(price);
-        });
-      });
-
-      return row;
-    });
-
-    // Generate CSV
     const csv = [
-      headers.map(escapeCell).join(","),
-      ...rows.map((row) => row.map(escapeCell).join(",")),
+      headers.join(","),
+      ...rows.map((row) =>
+        row
+          .map((cell) => {
+            const value = String(cell || "");
+            return value.includes(",") ||
+              value.includes('"') ||
+              value.includes("\n")
+              ? `"${value.replace(/"/g, '""')}"`
+              : value;
+          })
+          .join(","),
+      ),
     ].join("\n");
 
     return csv;
@@ -258,16 +202,6 @@ export default function Items() {
               </button>
             )}
             <button
-              onClick={() => setShowImportDialog(true)}
-              disabled={loading}
-              className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-purple-600/20 to-purple-600/10 border border-purple-600/50 text-purple-300 hover:text-purple-200 rounded-xl hover:from-purple-600/30 hover:to-purple-600/20 hover:border-purple-500/60 font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-purple-600/20 hover:shadow-xl hover:shadow-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
-              <FileUp className="w-4 h-4 xs:w-4.5 xs:h-4.5 relative z-10" />
-              <span className="hidden xs:inline relative z-10">Import Excel</span>
-              <span className="xs:hidden relative z-10">Import</span>
-            </button>
-            <button
               onClick={() => setShowForm(true)}
               disabled={loading}
               className="flex items-center justify-center gap-2 px-4 xs:px-5 sm:px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 text-xs xs:text-sm sm:text-base whitespace-nowrap shadow-lg shadow-blue-600/40 hover:shadow-xl hover:shadow-blue-500/60 hover:scale-[1.02] group relative overflow-hidden"
@@ -305,14 +239,6 @@ export default function Items() {
             />
           </div>
         </div>
-      )}
-
-      {/* Excel Import Modal */}
-      {showImportDialog && (
-        <ExcelImportDialog
-          onClose={() => setShowImportDialog(false)}
-          onSuccess={handleImportItems}
-        />
       )}
 
       {/* Search bar - Mobile only */}
