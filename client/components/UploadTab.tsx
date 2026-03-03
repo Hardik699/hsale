@@ -60,29 +60,39 @@ export default function UploadTab({ type }: UploadTabProps) {
       try {
         console.log(`Fetching month status for ${type} year ${selectedYear}`);
 
-        const response = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`, {
-          signal: controller.signal
-        });
+        // Add a timeout for the fetch request (30 seconds)
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-        if (!response.ok) {
-          console.warn(`API returned status ${response.status}`);
-          if (isMounted) {
-            setMonthsStatus(Array.from({ length: 12 }, (_, i) => ({
-              month: i + 1,
-              status: "pending" as const
-            })));
+        try {
+          const response = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`, {
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            console.warn(`API returned status ${response.status}`);
+            if (isMounted) {
+              setMonthsStatus(Array.from({ length: 12 }, (_, i) => ({
+                month: i + 1,
+                status: "pending" as const
+              })));
+            }
+            return;
           }
-          return;
-        }
 
-        const data = await response.json();
-        if (isMounted && data.data && Array.isArray(data.data)) {
-          setMonthsStatus(data.data);
+          const data = await response.json();
+          if (isMounted && data.data && Array.isArray(data.data)) {
+            setMonthsStatus(data.data);
+          }
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          throw fetchError;
         }
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           if (!isCleanup) {
-            console.error("❌ Fetch was aborted (timeout or cancelled)");
+            console.error("❌ Month status fetch was aborted (timeout or cancelled)");
           }
           return; // Ignore aborts
         }

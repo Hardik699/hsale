@@ -247,6 +247,8 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
       return res.status(400).json({ error: "Type is required" });
     }
 
+    console.log(`📋 Getting uploads for type: ${type}, year: ${year}`);
+
     const db = await getDatabase();
     const collection = db.collection(type as string);
 
@@ -254,6 +256,7 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
     const filterYear = year ? parseInt(year as string) : new Date().getFullYear();
 
     const data = await collection.find({ year: filterYear }).toArray();
+    console.log(`✅ Found ${data.length} uploads for ${type} year ${filterYear}`);
 
     // Create a map of uploaded months
     const uploadedMonths: Record<number, boolean> = {};
@@ -271,13 +274,13 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
 
     res.json({ data: monthsStatus });
   } catch (error) {
-    console.error("Get uploads error:", error);
-    // Return default empty status on error
+    console.error("❌ Get uploads error:", error);
+    // Return default empty status on error instead of throwing
     const monthsStatus = Array.from({ length: 12 }, (_, i) => ({
       month: i + 1,
       status: "pending" as const
     }));
-    res.json({ data: monthsStatus });
+    res.status(500).json({ data: monthsStatus, error: error instanceof Error ? error.message : "Server error" });
   }
 };
 
