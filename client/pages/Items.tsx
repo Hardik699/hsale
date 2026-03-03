@@ -199,7 +199,7 @@ export default function Items() {
   const downloadTemplateWithDropdowns = async () => {
     try {
       // Import XLSX dynamically
-      const XLSX = (await import("xlsx")).default;
+      const XLSX = await import("xlsx");
 
       // Get all unique variations from existing items
       const allVariationNames = Array.from(
@@ -306,9 +306,14 @@ export default function Items() {
 
       XLSX.writeFile(wb, "item-import-template-with-dropdowns.xlsx");
       console.log("✅ Template with dropdowns downloaded successfully");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error downloading template:", error);
-      alert("Failed to download template. Please try again.");
+      console.error("Error details:", {
+        name: error.name,
+        message: error.message,
+        stack: error.stack?.split("\n").slice(0, 3).join("\n"),
+      });
+      alert(`Failed to download template: ${error.message || "Unknown error occurred"}`);
     }
   };
 
