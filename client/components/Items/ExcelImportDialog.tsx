@@ -403,6 +403,7 @@ export default function ExcelImportDialog({
         "Item Name": "Anjeer Roll",
         "Group": "Sweets",
         "Category": "Dry Fruits",
+        "Short Code": "AR",
         "Description": "Premium dry fruit roll",
         "HSN Code": "1234",
         "Unit Type": "Single Count",
@@ -419,6 +420,7 @@ export default function ExcelImportDialog({
         "Item Name": "Anjeer Roll",
         "Group": "Sweets",
         "Category": "Dry Fruits",
+        "Short Code": "AR",
         "Description": "Premium dry fruit roll",
         "HSN Code": "1234",
         "Unit Type": "Single Count",
@@ -435,6 +437,7 @@ export default function ExcelImportDialog({
         "Item Name": "Kaju Barfi",
         "Group": "Sweets",
         "Category": "Traditional",
+        "Short Code": "KB",
         "Description": "Hand-made kaju barfi",
         "HSN Code": "5678",
         "Unit Type": "Single Count",
@@ -451,6 +454,7 @@ export default function ExcelImportDialog({
         "Item Name": "Kaju Barfi",
         "Group": "Sweets",
         "Category": "Traditional",
+        "Short Code": "KB",
         "Description": "Hand-made kaju barfi",
         "HSN Code": "5678",
         "Unit Type": "Single Count",
@@ -466,16 +470,40 @@ export default function ExcelImportDialog({
     ];
 
     const ws = XLSX.utils.json_to_sheet(template);
-    ws.A1.f = "Item Name (Required)";
-    ws.B1.f = "Group (Required)";
-    ws.C1.f = "Category (Required)";
 
-    // Set column widths
-    const colWidths = [20, 15, 20, 25, 12, 15, 12, 15, 8, 12, 20, 15, 12, 15];
+    // Set header styling with proper column order
+    const headers = [
+      "Item Name",
+      "Group",
+      "Category",
+      "Short Code",
+      "Description",
+      "HSN Code",
+      "Unit Type",
+      "Sale Type",
+      "Profit Margin",
+      "GST",
+      "Item Type",
+      "Variation Name",
+      "Variation Value",
+      "Base Price",
+      "SAP Code",
+    ];
+
+    // Add header validation note
+    headers.forEach((header, idx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: idx });
+      if (!ws[cellRef]) {
+        ws[cellRef] = { t: "s", v: header };
+      }
+    });
+
+    // Set column widths for better readability
+    const colWidths = [18, 12, 15, 10, 20, 10, 14, 10, 12, 8, 10, 14, 14, 11, 10];
     ws["!cols"] = colWidths.map(w => ({ wch: w }));
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Items");
+    XLSX.utils.book_append_sheet(wb, ws, "Items Template");
     XLSX.writeFile(wb, "item-import-template.xlsx");
   };
 
@@ -505,11 +533,6 @@ export default function ExcelImportDialog({
                 <p className="text-gray-500 text-sm mb-4">
                   Supported format: .xlsx, .xls
                 </p>
-                <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                  <p className="text-blue-300 text-xs">
-                    💡 <strong>Pro Tip:</strong> Item ID and Short Code are auto-generated. Just provide Item Name, Group, Category, and variation details.
-                  </p>
-                </div>
                 <input
                   type="file"
                   accept=".xlsx,.xls"
@@ -535,12 +558,51 @@ export default function ExcelImportDialog({
                 )}
               </div>
 
+              {/* Expected Format */}
+              <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg space-y-3">
+                <p className="text-gray-300 font-semibold text-sm">Expected Format:</p>
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+                  <div>
+                    <p className="text-gray-300 font-medium mb-1">Required Columns:</p>
+                    <ul className="space-y-1">
+                      <li>✓ Item Name</li>
+                      <li>✓ Group</li>
+                      <li>✓ Category</li>
+                      <li>✓ Variation Name</li>
+                      <li>✓ Variation Value</li>
+                      <li>✓ Base Price</li>
+                      <li>✓ SAP Code</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="text-gray-300 font-medium mb-1">Optional Columns:</p>
+                    <ul className="space-y-1">
+                      <li>- Short Code</li>
+                      <li>- Description</li>
+                      <li>- HSN Code</li>
+                      <li>- Unit Type</li>
+                      <li>- Sale Type (QTY/KG)</li>
+                      <li>- Profit Margin</li>
+                      <li>- GST</li>
+                      <li>- Item Type</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* Smart Features */}
+              <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                <p className="text-green-300 text-xs">
+                  ✨ <strong>Smart Features:</strong> Duplicate variations (250Gms = 250GMS = 250 GMS) are automatically detected and skipped. Existing items are updated with new variations.
+                </p>
+              </div>
+
               <div className="flex gap-3">
                 <button
                   onClick={downloadTemplate}
                   className="flex-1 px-4 py-2 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-lg font-medium transition-colors"
                 >
-                  Download Template
+                  📥 Download Template
                 </button>
                 <button
                   onClick={onClose}
