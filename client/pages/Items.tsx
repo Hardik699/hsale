@@ -35,8 +35,12 @@ export default function Items() {
       try {
         setLoading(true);
         console.log(`🔄 Fetching items (attempt ${retryCount + 1})...`);
+        console.log(`📍 Fetching from: ${window.location.origin}/api/items`);
 
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        const timeoutId = setTimeout(() => {
+          console.log("⏱️ Fetch timeout after 30 seconds");
+          controller.abort();
+        }, 30000); // 30 second timeout
 
         const response = await fetch("/api/items", {
           signal: controller.signal,
@@ -53,6 +57,11 @@ export default function Items() {
         setItems(Array.isArray(data) ? data : []);
       } catch (error: any) {
         console.error("❌ Failed to fetch items:", error);
+        console.error("Error details:", {
+          name: error.name,
+          message: error.message,
+          stack: error.stack?.split("\n").slice(0, 3).join("\n"),
+        });
 
         // Retry once after 3 seconds if it's a network error or timeout
         if (retryCount < 1) {
@@ -88,6 +97,7 @@ export default function Items() {
     if (!confirm(`Are you sure you want to delete this item?`)) return;
 
     try {
+      console.log(`🗑️ Deleting item: ${itemId}`);
       const response = await fetch(`/api/items/${itemId}`, {
         method: "DELETE",
       });
@@ -96,10 +106,21 @@ export default function Items() {
         setItems(items.filter((item) => item.itemId !== itemId));
         console.log(`✅ Item ${itemId} deleted successfully`);
       } else {
-        console.error("Failed to delete item");
+        const errorData = await response.json().catch(() => ({}));
+        console.error(`❌ Failed to delete item ${itemId}:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData.error || "Unknown error",
+          details: errorData.details || "",
+        });
+        alert(`Failed to delete item: ${errorData.error || "Unknown error"}`);
       }
-    } catch (error) {
-      console.error("Error deleting item:", error);
+    } catch (error: any) {
+      console.error(`❌ Error deleting item ${itemId}:`, {
+        name: error.name,
+        message: error.message,
+      });
+      alert(`Error deleting item: ${error.message || "Unknown error"}`);
     }
   };
 
@@ -113,21 +134,32 @@ export default function Items() {
     try {
       let successCount = 0;
       let failCount = 0;
+      const failedItems: string[] = [];
 
       for (const itemId of selectedItems) {
         try {
+          console.log(`🗑️ Deleting item: ${itemId}`);
           const response = await fetch(`/api/items/${itemId}`, {
             method: "DELETE",
           });
 
           if (response.ok) {
             successCount++;
+            console.log(`✅ Successfully deleted item: ${itemId}`);
           } else {
             failCount++;
+            failedItems.push(itemId);
+            const errorData = await response.json().catch(() => ({}));
+            console.error(`❌ Failed to delete item ${itemId}:`, {
+              status: response.status,
+              statusText: response.statusText,
+              error: errorData.error || "Unknown error",
+            });
           }
         } catch (error) {
           failCount++;
-          console.error(`Error deleting item ${itemId}:`, error);
+          failedItems.push(itemId);
+          console.error(`❌ Network error deleting item ${itemId}:`, error);
         }
       }
 
@@ -140,7 +172,11 @@ export default function Items() {
         console.log(`✅ Deleted ${successCount} item${successCount !== 1 ? "s" : ""}`);
       }
       if (failCount > 0) {
-        console.error(`❌ Failed to delete ${failCount} item${failCount !== 1 ? "s" : ""}`);
+        console.error(`❌ Failed to delete ${failCount} item${failCount !== 1 ? "s" : ""}:`, {
+          failedItems,
+          details: "Check console for individual error messages",
+        });
+        alert(`Deleted ${successCount} items. Failed to delete ${failCount} items: ${failedItems.join(", ")}`);
       }
     } finally {
       setDeleting(false);
@@ -151,15 +187,25 @@ export default function Items() {
   useEffect(() => {
     const migrateGS1 = async () => {
       try {
+        console.log("🔄 Starting GS1 migration...");
+        console.log(`📍 POST to: ${window.location.origin}/api/items/migrate/add-gs1`);
+
         const response = await fetch("/api/items/migrate/add-gs1", {
           method: "POST",
         });
+
         if (response.ok) {
           const result = await response.json();
           console.log("✅ GS1 migration completed:", result);
+        } else {
+          console.warn(`⚠️ Migration returned status ${response.status}: ${response.statusText}`);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("GS1 migration failed (non-critical):", error);
+        console.error("Migration error details:", {
+          name: error.name,
+          message: error.message,
+        });
       }
     };
 
@@ -180,7 +226,7 @@ export default function Items() {
   const downloadTemplateWithDropdowns = async () => {
     try {
       // Import XLSX dynamically
-      const XLSX = (await import("xlsx")).default;
+      const XLSX = await import("xlsx");
 
       // Get all unique variations from existing items
       const allVariationNames = Array.from(
@@ -287,9 +333,14 @@ export default function Items() {
 
       XLSX.writeFile(wb, "item-import-template-with-dropdowns.xlsx");
       console.log("✅ Template with dropdowns downloaded successfully");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error downloading template:", error);
-      alert("Failed to download template. Please try again.");
+      console.error("Error details:", {
+        name: error.name,
+        message: error.message,
+        stack: error.stack?.split("\n").slice(0, 3).join("\n"),
+      });
+      alert(`Failed to download template: ${error.message || "Unknown error occurred"}`);
     }
   };
 

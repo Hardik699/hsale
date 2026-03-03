@@ -29,6 +29,14 @@ interface ParsedItem {
   }>;
 }
 
+// Helper function to normalize variation values for matching
+const normalizeVariationValue = (value: string): string => {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, "") // Remove all spaces
+    .trim();
+};
+
 export default function ExcelImportDialog({
   onClose,
   onSuccess,
@@ -39,6 +47,7 @@ export default function ExcelImportDialog({
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<"upload" | "preview" | "confirm">("upload");
   const [importedCount, setImportedCount] = useState(0);
+  const [skippedCount, setSkippedCount] = useState(0);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -159,6 +168,27 @@ export default function ExcelImportDialog({
     setError(null);
 
     try {
+      // Fetch existing items from database to check for duplicate variations
+      const existingItemsResponse = await fetch("/api/items");
+      const existingItems: any[] = await existingItemsResponse.json();
+
+      // Build a map of normalized variation values from existing items
+      const existingVariationsMap = new Map<string, Set<string>>();
+      existingItems.forEach((item) => {
+        if (item.variations && Array.isArray(item.variations)) {
+          const itemName = item.itemName;
+          if (!existingVariationsMap.has(itemName)) {
+            existingVariationsMap.set(itemName, new Set());
+          }
+          const variationSet = existingVariationsMap.get(itemName)!;
+          item.variations.forEach((v: any) => {
+            // Normalize and store the variation value
+            const normalized = normalizeVariationValue(v.value);
+            variationSet.add(normalized);
+          });
+        }
+      });
+
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(worksheet);
@@ -174,11 +204,93 @@ export default function ExcelImportDialog({
       const createdItems: any[] = [];
       let successCount = 0;
       let failCount = 0;
+      let skipped = 0;
 
       // Create items one by one
       for (let index = 0; index < parsedItems.length; index++) {
         try {
           const item = parsedItems[index];
+
+          // Check if item already exists
+          const itemExists = existingItems.some((ei) => ei.itemName === item.itemName);
+          const existingVariations = existingVariationsMap.get(item.itemName) || new Set();
+
+          // Filter out variations that already exist in the database
+          const newVariations = item.variations.filter((v) => {
+            const normalizedValue = normalizeVariationValue(v.value);
+            const alreadyExists = existingVariations.has(normalizedValue);
+
+            if (alreadyExists) {
+              console.log(
+                `⏭️ Skipping variation "${v.value}" for "${item.itemName}" - already exists in database`
+              );
+              skipped++;
+            }
+
+            return !alreadyExists;
+          });
+
+          // If all variations already exist, skip this item
+          if (newVariations.length === 0 && item.variations.length > 0) {
+            console.log(
+              `⏭️ Skipping "${item.itemName}" - all variations already exist in database`
+            );
+            continue;
+          }
+
+          // If item exists but has new variations, we need to fetch and update it
+          if (itemExists && newVariations.length > 0) {
+            console.log(
+              `📝 Adding new variations to existing item "${item.itemName}"`
+            );
+
+            // Get the existing item to get its itemId
+            const existingItem = existingItems.find((ei) => ei.itemName === item.itemName);
+            if (!existingItem) continue;
+
+            // Create variations for the new ones only
+            const variationsToAdd = newVariations.map((v, vIdx) => {
+              const autoPrices = calculateAutoPrices(v.price);
+              return {
+                id: `var-${Date.now()}-${index}-${vIdx}`,
+                name: v.name,
+                value: v.value,
+                price: v.price,
+                sapCode: v.sapCode,
+                gs1Code: "",
+                saleType: v.saleType,
+                profitMargin: v.profitMargin,
+                gs1Enabled: false,
+                channels: {
+                  Dining: v.price,
+                  Parcale: v.price,
+                  Zomato: autoPrices.Zomato,
+                  Swiggy: autoPrices.Swiggy,
+                  GS1: autoPrices.GS1,
+                },
+              };
+            });
+
+            // Update the existing item with new variations
+            const updateResponse = await fetch(`/api/items/${existingItem.itemId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                variations: [...(existingItem.variations || []), ...variationsToAdd],
+              }),
+            });
+
+            if (updateResponse.ok) {
+              createdItems.push({ ...existingItem, variations: [...(existingItem.variations || []), ...variationsToAdd] });
+              successCount++;
+            } else {
+              failCount++;
+              console.error(
+                `Failed to add variations to ${item.itemName}: ${updateResponse.statusText}`
+              );
+            }
+            continue;
+          }
 
           // Auto-generate Item ID if not provided
           let itemId = item.shortCode || "";
@@ -202,7 +314,7 @@ export default function ExcelImportDialog({
           }
 
           // Convert variations to item variations with channels
-          const variations = item.variations.map((v, vIdx) => {
+          const variations = newVariations.map((v, vIdx) => {
             const autoPrices = calculateAutoPrices(v.price);
             return {
               id: `var-${Date.now()}-${index}-${vIdx}`,
@@ -263,6 +375,7 @@ export default function ExcelImportDialog({
       }
 
       setImportedCount(successCount);
+      setSkippedCount(skipped);
       setStep("confirm");
 
       if (successCount > 0) {
@@ -290,6 +403,7 @@ export default function ExcelImportDialog({
         "Item Name": "Anjeer Roll",
         "Group": "Sweets",
         "Category": "Dry Fruits",
+        "Short Code": "AR",
         "Description": "Premium dry fruit roll",
         "HSN Code": "1234",
         "Unit Type": "Single Count",
@@ -306,6 +420,7 @@ export default function ExcelImportDialog({
         "Item Name": "Anjeer Roll",
         "Group": "Sweets",
         "Category": "Dry Fruits",
+        "Short Code": "AR",
         "Description": "Premium dry fruit roll",
         "HSN Code": "1234",
         "Unit Type": "Single Count",
@@ -322,6 +437,7 @@ export default function ExcelImportDialog({
         "Item Name": "Kaju Barfi",
         "Group": "Sweets",
         "Category": "Traditional",
+        "Short Code": "KB",
         "Description": "Hand-made kaju barfi",
         "HSN Code": "5678",
         "Unit Type": "Single Count",
@@ -338,6 +454,7 @@ export default function ExcelImportDialog({
         "Item Name": "Kaju Barfi",
         "Group": "Sweets",
         "Category": "Traditional",
+        "Short Code": "KB",
         "Description": "Hand-made kaju barfi",
         "HSN Code": "5678",
         "Unit Type": "Single Count",
@@ -353,16 +470,40 @@ export default function ExcelImportDialog({
     ];
 
     const ws = XLSX.utils.json_to_sheet(template);
-    ws.A1.f = "Item Name (Required)";
-    ws.B1.f = "Group (Required)";
-    ws.C1.f = "Category (Required)";
 
-    // Set column widths
-    const colWidths = [20, 15, 20, 25, 12, 15, 12, 15, 8, 12, 20, 15, 12, 15];
+    // Set header styling with proper column order
+    const headers = [
+      "Item Name",
+      "Group",
+      "Category",
+      "Short Code",
+      "Description",
+      "HSN Code",
+      "Unit Type",
+      "Sale Type",
+      "Profit Margin",
+      "GST",
+      "Item Type",
+      "Variation Name",
+      "Variation Value",
+      "Base Price",
+      "SAP Code",
+    ];
+
+    // Add header validation note
+    headers.forEach((header, idx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: idx });
+      if (!ws[cellRef]) {
+        ws[cellRef] = { t: "s", v: header };
+      }
+    });
+
+    // Set column widths for better readability
+    const colWidths = [18, 12, 15, 10, 20, 10, 14, 10, 12, 8, 10, 14, 14, 11, 10];
     ws["!cols"] = colWidths.map(w => ({ wch: w }));
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Items");
+    XLSX.utils.book_append_sheet(wb, ws, "Items Template");
     XLSX.writeFile(wb, "item-import-template.xlsx");
   };
 
@@ -392,11 +533,6 @@ export default function ExcelImportDialog({
                 <p className="text-gray-500 text-sm mb-4">
                   Supported format: .xlsx, .xls
                 </p>
-                <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                  <p className="text-blue-300 text-xs">
-                    💡 <strong>Pro Tip:</strong> Item ID and Short Code are auto-generated. Just provide Item Name, Group, Category, and variation details.
-                  </p>
-                </div>
                 <input
                   type="file"
                   accept=".xlsx,.xls"
@@ -422,12 +558,51 @@ export default function ExcelImportDialog({
                 )}
               </div>
 
+              {/* Expected Format */}
+              <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg space-y-3">
+                <p className="text-gray-300 font-semibold text-sm">Expected Format:</p>
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+                  <div>
+                    <p className="text-gray-300 font-medium mb-1">Required Columns:</p>
+                    <ul className="space-y-1">
+                      <li>✓ Item Name</li>
+                      <li>✓ Group</li>
+                      <li>✓ Category</li>
+                      <li>✓ Variation Name</li>
+                      <li>✓ Variation Value</li>
+                      <li>✓ Base Price</li>
+                      <li>✓ SAP Code</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="text-gray-300 font-medium mb-1">Optional Columns:</p>
+                    <ul className="space-y-1">
+                      <li>- Short Code</li>
+                      <li>- Description</li>
+                      <li>- HSN Code</li>
+                      <li>- Unit Type</li>
+                      <li>- Sale Type (QTY/KG)</li>
+                      <li>- Profit Margin</li>
+                      <li>- GST</li>
+                      <li>- Item Type</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* Smart Features */}
+              <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                <p className="text-green-300 text-xs">
+                  ✨ <strong>Smart Features:</strong> Duplicate variations (250Gms = 250GMS = 250 GMS) are automatically detected and skipped. Existing items are updated with new variations.
+                </p>
+              </div>
+
               <div className="flex gap-3">
                 <button
                   onClick={downloadTemplate}
                   className="flex-1 px-4 py-2 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-lg font-medium transition-colors"
                 >
-                  Download Template
+                  📥 Download Template
                 </button>
                 <button
                   onClick={onClose}
@@ -534,11 +709,16 @@ export default function ExcelImportDialog({
               </div>
               <div>
                 <p className="text-2xl font-bold text-white mb-2">
-                  Import Successful!
+                  Import Complete!
                 </p>
                 <p className="text-gray-300">
                   {importedCount} item{importedCount !== 1 ? "s" : ""} created successfully
                 </p>
+                {skippedCount > 0 && (
+                  <p className="text-gray-400 text-sm mt-2">
+                    ⏭️ {skippedCount} variation{skippedCount !== 1 ? "s" : ""} skipped (already exist in database)
+                  </p>
+                )}
               </div>
             </div>
           )}
