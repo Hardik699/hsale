@@ -68,23 +68,18 @@ import {
 export function createServer() {
   const app = express();
 
+  // Set socket timeout FIRST (20 minutes = 1200 seconds) before any other middleware
+  app.use((req, res, next) => {
+    req.socket.setTimeout(1200000); // 20 minutes for socket
+    req.setTimeout(1200000); // 20 minutes for request
+    res.setTimeout(1200000); // 20 minutes for response
+    next();
+  });
+
   // Middleware
   app.use(cors());
   app.use(express.json({ limit: "200mb" }));
   app.use(express.urlencoded({ extended: true, limit: "200mb" }));
-
-  // Set socket timeout to 15 minutes before any other middleware
-  app.use((req, res, next) => {
-    req.socket.setTimeout(900000); // 15 minutes
-    next();
-  });
-
-  // Increase timeout for large uploads (15 minutes = 900 seconds)
-  app.use((req, res, next) => {
-    req.setTimeout(900000);
-    res.setTimeout(900000);
-    next();
-  });
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {

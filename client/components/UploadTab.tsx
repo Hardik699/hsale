@@ -209,7 +209,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`Starting validation for ${minimalData.length - 1} rows (minimal payload)`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for validation
+      // 10 minutes timeout for validation (need extra time for large JSON parsing on server)
+      const timeoutId = setTimeout(() => controller.abort(), 600000);
 
       // Show that validation is in progress
       setMessage({ type: "warning", text: "Validating data... This may take a moment for large files." });
@@ -321,8 +322,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const controller = new AbortController();
-      // Increase timeout based on file size: 1 second per 100 rows, minimum 5 minutes, maximum 15 minutes
-      const estimatedTimeMs = Math.max(300000, Math.min(900000, (fileData.rows / 100) * 1000));
+      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
+      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
       const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
 
       const response = await fetch("/api/upload", {
@@ -427,8 +428,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const controller = new AbortController();
-      // Increase timeout based on file size: 1 second per 100 rows, minimum 5 minutes, maximum 15 minutes
-      const estimatedTimeMs = Math.max(300000, Math.min(900000, (fileData.rows / 100) * 1000));
+      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
+      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
       const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
 
       const response = await fetch("/api/upload", {
