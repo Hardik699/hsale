@@ -661,8 +661,15 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
     const responseSize = JSON.stringify(responsePayload).length;
     console.log(`📊 Response payload size: ${(responseSize / 1024).toFixed(2)} KB`);
 
-    res.setHeader('Content-Type', 'application/json');
+    // Set proper headers for large responses
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    // Send JSON response
     res.json(responsePayload);
+    console.log(`✅ Validation response sent successfully`);
   } catch (error) {
     console.error("❌ Validation error:", error);
     const errorMessage = error instanceof Error ? error.message : "Failed to validate data";

@@ -40,6 +40,8 @@ function expressPlugin(): Plugin {
     configureServer(server) {
       app = createServer();
 
+      console.log("✅ Express app created and ready to handle requests");
+
       // Middleware to handle API routes with Express
       server.middlewares.use((req, res, next) => {
         const url = req.url || "";
@@ -47,11 +49,31 @@ function expressPlugin(): Plugin {
         // Only let Express handle /api routes
         if (url.startsWith("/api")) {
           try {
-            return app(req, res, next);
+            // Invoke Express app with proper next callback
+            // This allows Express to complete the request/response cycle
+            return app(req, res, (err?: any) => {
+              // If Express middleware chain ends without handling, call Vite's next
+              if (err) {
+                console.error("❌ Express error:", err);
+                if (!res.headersSent) {
+                  res.statusCode = 500;
+                  res.setHeader("Content-Type", "application/json");
+                  res.end(JSON.stringify({ error: "Internal Server Error" }));
+                }
+              } else if (!res.headersSent) {
+                // No error but also no response sent - 404
+                res.statusCode = 404;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "Not Found" }));
+              }
+            });
           } catch (error) {
-            console.error("Express handler error:", error);
-            res.statusCode = 500;
-            res.end("Internal Server Error");
+            console.error("❌ Error in Express middleware for", url, ":", error);
+            if (!res.headersSent) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Internal Server Error", details: String(error) }));
+            }
           }
         }
 
