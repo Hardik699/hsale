@@ -338,8 +338,15 @@ export const handleUpload: RequestHandler = async (req, res) => {
       status: "uploaded"
     });
 
-    // Data is stored in petpooja collection and will be fetched directly from DB when needed
-    // No need to process and duplicate data in item variations
+    // Process and create items from petpooja data
+    if (type === "petpooja") {
+      try {
+        await processAndCreateItemsFromPetpooja(db, finalData);
+      } catch (itemError) {
+        console.error("⚠️ Warning: Failed to auto-create items from upload:", itemError);
+        // Don't fail the upload if item creation fails
+      }
+    }
 
     res.json({
       success: true,
@@ -785,6 +792,119 @@ export const handleChunkUpload: RequestHandler = async (req, res) => {
   }
 };
 
+// Helper function to extract unique items from petpooja data and create items
+async function processAndCreateItemsFromPetpooja(db: Db, data: any[]): Promise<number> {
+  try {
+    console.log(`🔍 Processing petpooja data to extract and create items...`);
+
+    const headers = data[0] as string[];
+    const dataRows = data.slice(1);
+
+    // Find column indices
+    const getColumnIndex = (name: string) =>
+      headers.findIndex((h) => h?.toLowerCase().trim() === name.toLowerCase().trim());
+
+    const sapCodeIdx = getColumnIndex("sap_code");
+    const restaurantIdx = getColumnIndex("restaurant_name");
+
+    if (sapCodeIdx === -1) {
+      console.warn("⚠️ SAP code column not found, skipping item creation");
+      return 0;
+    }
+
+    // Extract unique SAP codes from the data
+    const sapCodeMap = new Map<string, Set<string>>(); // sapCode -> set of item names
+
+    for (const row of dataRows) {
+      if (!Array.isArray(row)) continue;
+
+      const sapCode = row[sapCodeIdx]?.toString().trim();
+      const itemName = restaurantIdx >= 0 ? row[restaurantIdx]?.toString().trim() : "Unknown";
+
+      if (sapCode && itemName) {
+        if (!sapCodeMap.has(sapCode)) {
+          sapCodeMap.set(sapCode, new Set());
+        }
+        sapCodeMap.get(sapCode)!.add(itemName);
+      }
+    }
+
+    console.log(`📊 Found ${sapCodeMap.size} unique SAP codes in upload data`);
+
+    const itemsCollection = db.collection("items");
+    let itemsCreated = 0;
+    let itemsUpdated = 0;
+
+    // Process each SAP code
+    for (const [sapCode, itemNames] of sapCodeMap.entries()) {
+      try {
+        // Check if item with this SAP code already exists
+        const existingVariation = await itemsCollection.findOne({
+          "variations.sapCode": sapCode
+        });
+
+        if (existingVariation) {
+          console.log(`  ✓ Item already has SAP code: ${sapCode}`);
+          itemsUpdated++;
+          continue;
+        }
+
+        // Create a new item for this SAP code if it doesn't exist
+        const itemName = Array.from(itemNames)[0]; // Use first occurrence as name
+        const shortCode = sapCode.substring(0, 3).toUpperCase();
+        const newItemId = `AUTO-${sapCode}-${Date.now()}`;
+
+        const newItem = {
+          itemId: newItemId,
+          name: itemName || "Imported Item",
+          shortCode: shortCode,
+          group: "Imported",
+          category: "Other",
+          itemType: "Goods",
+          basePrice: 0,
+          hsnCode: "",
+          gst: 0,
+          profitMargin: 0,
+          unitType: "pcs",
+          variations: [
+            {
+              id: `VAR-${Date.now()}`,
+              name: "Default Variation",
+              value: itemName || "Default",
+              basePrice: 0,
+              saleType: "QTY",
+              sapCode: sapCode,
+              prices: {
+                Zomato: 0,
+                Swiggy: 0,
+                GS1: 0
+              }
+            }
+          ],
+          createdAt: new Date(),
+          createdFrom: "upload"
+        };
+
+        await itemsCollection.insertOne(newItem);
+        console.log(`  ✅ Created new item: ${newItemId} with SAP code: ${sapCode}`);
+        itemsCreated++;
+      } catch (error) {
+        console.error(`  ❌ Error processing SAP code ${sapCode}:`, error);
+        // Continue with next SAP code on error
+      }
+    }
+
+    // Clear SAP code cache since we've added new items
+    sapCodeMapCache = null;
+    console.log(`✅ Item processing complete: ${itemsCreated} created, ${itemsUpdated} already exist`);
+
+    return itemsCreated + itemsUpdated;
+  } catch (error) {
+    console.error("❌ Error processing items from petpooja data:", error);
+    throw error;
+  }
+}
+
 // POST /api/upload/finalize - Finalize chunked upload by combining all chunks and saving to database
 export const handleFinalizeUpload: RequestHandler = async (req, res) => {
   try {
@@ -899,6 +1019,16 @@ export const handleFinalizeUpload: RequestHandler = async (req, res) => {
         uploadedAt: new Date(),
         status: "uploaded"
       });
+
+      // Process and create items from petpooja data
+      if (type === "petpooja") {
+        try {
+          await processAndCreateItemsFromPetpooja(db, finalData);
+        } catch (itemError) {
+          console.error("⚠️ Warning: Failed to auto-create items from upload:", itemError);
+          // Don't fail the upload if item creation fails
+        }
+      }
     }
 
     // Clean up chunk storage
