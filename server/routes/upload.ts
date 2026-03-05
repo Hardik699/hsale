@@ -26,7 +26,7 @@ async function getDatabase(): Promise<Db> {
         maxPoolSize: 10,
         serverSelectionTimeoutMS: 5000,
         connectTimeoutMS: 10000,
-        socketTimeoutMS: 30000,
+        socketTimeoutMS: 600000, // 10 minutes - increased from 30s to handle large uploads
         family: 4, // Use IPv4
       });
 

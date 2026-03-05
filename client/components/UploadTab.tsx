@@ -227,8 +227,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`Starting validation for ${dataRowCount} rows${attemptText} (minimal payload)`);
 
       const controller = new AbortController();
-      // Increase timeout based on data size: 3 seconds per 1000 rows, minimum 15 minutes
-      const estimatedTimeMs = Math.max(900000, (dataRowCount / 1000) * 3000 + 600000);
+      // Increase timeout based on data size: 5 seconds per 1000 rows, minimum 15 minutes, maximum 30 minutes
+      const estimatedTimeMs = Math.max(900000, Math.min(1800000, (dataRowCount / 1000) * 5000 + 600000));
       const timeoutId = setTimeout(() => {
         console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
         controller.abort();
@@ -357,8 +357,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const controller = new AbortController();
-      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
-      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
+      // Timeout based on file size: 3 seconds per 100 rows, minimum 10 minutes, maximum 30 minutes
+      const estimatedTimeMs = Math.max(600000, Math.min(1800000, (fileData.rows / 100) * 3000));
       const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
 
       const response = await fetch("/api/upload", {
@@ -463,8 +463,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const controller = new AbortController();
-      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
-      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
+      // Timeout based on file size: 3 seconds per 100 rows, minimum 10 minutes, maximum 30 minutes
+      const estimatedTimeMs = Math.max(600000, Math.min(1800000, (fileData.rows / 100) * 3000));
       const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
 
       const response = await fetch("/api/upload", {
