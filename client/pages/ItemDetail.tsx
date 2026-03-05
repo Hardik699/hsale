@@ -30,7 +30,8 @@ const calculateAutoPrices = (basePrice: number) => {
 // Move outside component to prevent recalculation on every render
 const getDefaultDateRange = () => {
   const endDate = new Date().toISOString().split("T")[0];
-  const startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+  // Show data from last 3+ years to include all historical data (2000-01-01 as fallback for very old data)
+  const startDate = new Date(Date.now() - 1095 * 24 * 60 * 60 * 1000)
     .toISOString()
     .split("T")[0];
   return { start: startDate, end: endDate };

@@ -53,16 +53,27 @@ export default function UploadTab({ type }: UploadTabProps) {
   // Fetch month statuses when type or selectedYear changes
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
-    let isCleanup = false;
+    let timeoutId: NodeJS.Timeout | null = null;
 
     const fetchMonthStatus = async () => {
+      const controller = new AbortController();
+
       try {
         console.log(`Fetching month status for ${type} year ${selectedYear}`);
+
+        // Add a timeout for the fetch request (30 seconds)
+        timeoutId = setTimeout(() => {
+          controller.abort();
+        }, 30000);
 
         const response = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`, {
           signal: controller.signal
         });
+
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
 
         if (!response.ok) {
           console.warn(`API returned status ${response.status}`);
@@ -80,15 +91,20 @@ export default function UploadTab({ type }: UploadTabProps) {
           setMonthsStatus(data.data);
         }
       } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          if (!isCleanup) {
-            console.error("❌ Fetch was aborted (timeout or cancelled)");
-          }
-          return; // Ignore aborts
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
         }
-        console.error("Failed to fetch month status:", error);
-        // Set default pending status on fetch error - don't block UI
+
+        if (error instanceof Error && error.name === "AbortError") {
+          // Silently ignore abort errors (timeout or cleanup)
+          return;
+        }
+
+        // Only log if not cleaned up
         if (isMounted) {
+          console.error("Failed to fetch month status:", error);
+          // Set default pending status on fetch error - don't block UI
           setMonthsStatus(Array.from({ length: 12 }, (_, i) => ({
             month: i + 1,
             status: "pending" as const
@@ -100,10 +116,10 @@ export default function UploadTab({ type }: UploadTabProps) {
     fetchMonthStatus();
 
     return () => {
-      isCleanup = true;
       isMounted = false;
-      // Don't abort the controller during cleanup to avoid AbortError if something is still in flight
-      // This matches the pattern in ItemDetail.tsx that fixed similar AbortErrors
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     };
   }, [type, selectedYear]);
 
@@ -161,20 +177,21 @@ export default function UploadTab({ type }: UploadTabProps) {
     reader.readAsArrayBuffer(file);
   };
 
-  const simulateProgress = (duration: number = 2000) => {
+  const simulateProgress = (duration: number = 3000) => {
     setUploadProgress(0);
     const startTime = Date.now();
     const interval = setInterval(() => {
       const elapsed = Date.now() - startTime;
-      const progress = Math.min((elapsed / duration) * 100, 95);
+      // Use a curve that progresses faster initially then slows down
+      const progress = Math.min((elapsed / duration) * 100, 90);
       setUploadProgress(Math.round(progress));
       if (elapsed >= duration) {
         clearInterval(interval);
       }
-    }, 100);
+    }, 200);
   };
 
-  const validateData = async (fullData: any[]) => {
+  const validateData = async (fullData: any[], retryCount = 0) => {
     try {
       setIsValidating(true);
       setMessage(null);
@@ -205,14 +222,30 @@ export default function UploadTab({ type }: UploadTabProps) {
         return [row[restaurantIdx], row[sapCodeIdx]];
       });
 
-      console.log(`Starting validation for ${minimalData.length - 1} rows (minimal payload)`);
+      const dataRowCount = minimalData.length - 1;
+      const attemptText = retryCount > 0 ? ` (attempt ${retryCount + 1})` : "";
+      console.log(`Starting validation for ${dataRowCount} rows${attemptText} (minimal payload)`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for validation
+      // Increase timeout based on data size: 3 seconds per 1000 rows, minimum 15 minutes
+      const estimatedTimeMs = Math.max(900000, (dataRowCount / 1000) * 3000 + 600000);
+      const timeoutId = setTimeout(() => {
+        console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
+        controller.abort();
+      }, estimatedTimeMs);
+
+      // Show that validation is in progress
+      const statusText = retryCount > 0
+        ? `Retrying validation of ${dataRowCount.toLocaleString()} rows (attempt ${retryCount + 1})...`
+        : `Validating ${dataRowCount.toLocaleString()} rows... This may take a moment for large files.`;
+      setMessage({ type: "warning", text: statusText });
 
       const response = await fetch("/api/upload/validate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-Size": String(dataRowCount)
+        },
         body: JSON.stringify({
           type,
           data: minimalData,
@@ -222,7 +255,7 @@ export default function UploadTab({ type }: UploadTabProps) {
         signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (!response.ok) {
         let errorText = "Validation failed";
@@ -262,20 +295,33 @@ export default function UploadTab({ type }: UploadTabProps) {
       } else {
         setValidationResult(null);
         setSelectedValidRowIndices([]);
-        setMessage(null);
+        setMessage({ type: "success", text: "All rows validated successfully! Ready to upload." });
       }
       setIsValidating(false);
     } catch (error) {
       console.error("Validation error:", error);
-      if (error instanceof Error && error.name === "AbortError") {
-        setMessage({ type: "error", text: "Validation took too long. The server might be busy. Please try again." });
-      } else if (error instanceof TypeError && error.message === "Failed to fetch") {
+
+      // Retry logic for network errors
+      if ((error instanceof TypeError && error.message === "Failed to fetch") ||
+          (error instanceof Error && error.name === "AbortError")) {
+
+        if (retryCount < 2) {
+          console.log(`Retrying validation (attempt ${retryCount + 2}/3)...`);
+          // Wait 2 seconds before retrying
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          return validateData(fullData, retryCount + 1);
+        }
+
+        // All retries failed
         setMessage({
           type: "error",
-          text: "Connection failed during validation. This could be due to a large file or server timeout. Try refreshing the page."
+          text: "Validation failed after 3 attempts. Your connection may be unstable or the file is too large. Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking Upload anyway."
         });
       } else {
-        setMessage({ type: "error", text: `Failed to validate data: ${error instanceof Error ? error.message : "Unknown error"}` });
+        setMessage({
+          type: "error",
+          text: `Validation failed: ${error instanceof Error ? error.message : "Unknown error"}. You can still try uploading without validation.`
+        });
       }
       setIsValidating(false);
     }
@@ -289,11 +335,11 @@ export default function UploadTab({ type }: UploadTabProps) {
 
     setIsLoading(true);
     setUploadProgress(0);
-    setMessage(null);
-    simulateProgress(2000);
+    setMessage({ type: "warning", text: `Uploading ${fileData.rows} rows... Please wait.` });
+    simulateProgress(5000);
 
     try {
-      console.log("Starting upload for", type, selectedYear, selectedMonth);
+      console.log("Starting upload for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
       // Prepare upload body
       const uploadBody: any = {
@@ -310,11 +356,19 @@ export default function UploadTab({ type }: UploadTabProps) {
         uploadBody.validRowIndices = selectedValidRowIndices;
       }
 
+      const controller = new AbortController();
+      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
+      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
+      const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
+
       const response = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(uploadBody)
+        body: JSON.stringify(uploadBody),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       console.log("Upload response status:", response.status);
 
@@ -365,6 +419,11 @@ export default function UploadTab({ type }: UploadTabProps) {
           type: "error",
           text: "Cannot connect to server. Please check your internet connection and try again."
         });
+      } else if (error instanceof Error && error.name === "AbortError") {
+        setMessage({
+          type: "error",
+          text: "Upload took too long and was cancelled. The file is very large or your connection is slow. Please try again with a smaller file or better connection."
+        });
       } else {
         setMessage({
           type: "error",
@@ -382,11 +441,11 @@ export default function UploadTab({ type }: UploadTabProps) {
 
     setIsUpdatingExisting(true);
     setUploadProgress(0);
-    setMessage(null);
-    simulateProgress(2000);
+    setMessage({ type: "warning", text: `Updating ${fileData.rows} rows... Please wait.` });
+    simulateProgress(5000);
 
     try {
-      console.log("Updating existing data for", type, selectedYear, selectedMonth);
+      console.log("Updating existing data for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
       // Prepare update body
       const updateBody: any = {
@@ -403,11 +462,19 @@ export default function UploadTab({ type }: UploadTabProps) {
         updateBody.validRowIndices = selectedValidRowIndices;
       }
 
+      const controller = new AbortController();
+      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
+      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
+      const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
+
       const response = await fetch("/api/upload", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updateBody)
+        body: JSON.stringify(updateBody),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       console.log("Update response status:", response.status);
 
@@ -456,6 +523,11 @@ export default function UploadTab({ type }: UploadTabProps) {
         setMessage({
           type: "error",
           text: "Cannot connect to server. Please check your internet connection and try again."
+        });
+      } else if (error instanceof Error && error.name === "AbortError") {
+        setMessage({
+          type: "error",
+          text: "Update took too long and was cancelled. The file is very large or your connection is slow. Please try again with a smaller file or better connection."
         });
       } else {
         setMessage({

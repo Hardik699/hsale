@@ -247,6 +247,8 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
       return res.status(400).json({ error: "Type is required" });
     }
 
+    console.log(`📋 Getting uploads for type: ${type}, year: ${year}`);
+
     const db = await getDatabase();
     const collection = db.collection(type as string);
 
@@ -254,6 +256,7 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
     const filterYear = year ? parseInt(year as string) : new Date().getFullYear();
 
     const data = await collection.find({ year: filterYear }).toArray();
+    console.log(`✅ Found ${data.length} uploads for ${type} year ${filterYear}`);
 
     // Create a map of uploaded months
     const uploadedMonths: Record<number, boolean> = {};
@@ -271,13 +274,13 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
 
     res.json({ data: monthsStatus });
   } catch (error) {
-    console.error("Get uploads error:", error);
-    // Return default empty status on error
+    console.error("❌ Get uploads error:", error);
+    // Return default empty status on error instead of throwing
     const monthsStatus = Array.from({ length: 12 }, (_, i) => ({
       month: i + 1,
       status: "pending" as const
     }));
-    res.json({ data: monthsStatus });
+    res.status(500).json({ data: monthsStatus, error: error instanceof Error ? error.message : "Server error" });
   }
 };
 
@@ -434,6 +437,10 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
 
     const validRows = [];
     const invalidRows = [];
+    let validCount = 0;
+    let invalidCount = 0;
+
+    const startTime = Date.now();
 
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
@@ -456,24 +463,33 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
         reason = `SAP code "${sapCode}" not found in database`;
       }
 
-      const rowResult = {
-        rowIndex: i + 2,
-        data: isMinimal ? [restaurant, sapCode] : row
-      };
-
       if (isValid) {
-        validRows.push(rowResult);
+        validCount++;
+        // Only include first 100 valid rows in response to keep payload small
+        if (validRows.length < 100) {
+          validRows.push({ rowIndex: i + 2, data: isMinimal ? [restaurant, sapCode] : row });
+        }
       } else {
-        invalidRows.push({ ...rowResult, reason });
+        invalidCount++;
+        // Only include first 500 invalid rows in response to keep payload small
+        if (invalidRows.length < 500) {
+          invalidRows.push({
+            rowIndex: i + 2,
+            data: isMinimal ? [restaurant, sapCode] : row,
+            reason
+          });
+        }
       }
     }
 
-    console.log(`✅ Validation complete: ${validRows.length} valid, ${invalidRows.length} invalid rows`);
+    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`✅ Validation complete in ${elapsedTime}s: ${validCount} valid, ${invalidCount} invalid rows`);
+    console.log(`📦 Response payload: ${validRows.length} valid rows, ${invalidRows.length} invalid rows in response`);
 
     res.json({
       success: true,
-      validCount: validRows.length,
-      invalidCount: invalidRows.length,
+      validCount,
+      invalidCount,
       validRows,
       invalidRows,
     });
