@@ -191,7 +191,7 @@ export default function UploadTab({ type }: UploadTabProps) {
     }, 200);
   };
 
-  const validateData = async (fullData: any[]) => {
+  const validateData = async (fullData: any[], retryCount = 0) => {
     try {
       setIsValidating(true);
       setMessage(null);
@@ -223,22 +223,29 @@ export default function UploadTab({ type }: UploadTabProps) {
       });
 
       const dataRowCount = minimalData.length - 1;
-      console.log(`Starting validation for ${dataRowCount} rows (minimal payload)`);
+      const attemptText = retryCount > 0 ? ` (attempt ${retryCount + 1})` : "";
+      console.log(`Starting validation for ${dataRowCount} rows${attemptText} (minimal payload)`);
 
       const controller = new AbortController();
-      // Increase timeout based on data size: 2 seconds per 1000 rows, minimum 10 minutes
-      const estimatedTimeMs = Math.max(600000, (dataRowCount / 1000) * 2000 + 300000);
+      // Increase timeout based on data size: 3 seconds per 1000 rows, minimum 15 minutes
+      const estimatedTimeMs = Math.max(900000, (dataRowCount / 1000) * 3000 + 600000);
       const timeoutId = setTimeout(() => {
         console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
         controller.abort();
       }, estimatedTimeMs);
 
       // Show that validation is in progress
-      setMessage({ type: "warning", text: `Validating ${dataRowCount.toLocaleString()} rows... This may take a moment for large files.` });
+      const statusText = retryCount > 0
+        ? `Retrying validation of ${dataRowCount.toLocaleString()} rows (attempt ${retryCount + 1})...`
+        : `Validating ${dataRowCount.toLocaleString()} rows... This may take a moment for large files.`;
+      setMessage({ type: "warning", text: statusText });
 
       const response = await fetch("/api/upload/validate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-Size": String(dataRowCount)
+        },
         body: JSON.stringify({
           type,
           data: minimalData,
@@ -293,15 +300,22 @@ export default function UploadTab({ type }: UploadTabProps) {
       setIsValidating(false);
     } catch (error) {
       console.error("Validation error:", error);
-      if (error instanceof Error && error.name === "AbortError") {
+
+      // Retry logic for network errors
+      if ((error instanceof TypeError && error.message === "Failed to fetch") ||
+          (error instanceof Error && error.name === "AbortError")) {
+
+        if (retryCount < 2) {
+          console.log(`Retrying validation (attempt ${retryCount + 2}/3)...`);
+          // Wait 2 seconds before retrying
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          return validateData(fullData, retryCount + 1);
+        }
+
+        // All retries failed
         setMessage({
           type: "error",
-          text: "Validation request timed out or was aborted. The file might be too large or your connection is slow. Try uploading without validation or using a smaller file."
-        });
-      } else if (error instanceof TypeError && error.message === "Failed to fetch") {
-        setMessage({
-          type: "error",
-          text: "Connection failed during validation. This could be due to a network issue or large file size. Check your internet connection and try again."
+          text: "Validation failed after 3 attempts. Your connection may be unstable or the file is too large. Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking Upload anyway."
         });
       } else {
         setMessage({
