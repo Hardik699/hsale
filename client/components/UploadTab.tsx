@@ -310,21 +310,28 @@ export default function UploadTab({ type }: UploadTabProps) {
     } catch (error) {
       console.error("Validation error:", error);
 
-      // Retry logic for network errors
-      if ((error instanceof TypeError && error.message === "Failed to fetch") ||
-          (error instanceof Error && error.name === "AbortError")) {
+      const isFetchError = error instanceof TypeError && error.message.includes("Failed to fetch");
+      const isAbortError = error instanceof Error && error.name === "AbortError";
+      const isNetworkError = isFetchError || isAbortError;
 
+      // Retry logic for network errors
+      if (isNetworkError) {
         if (retryCount < 2) {
-          console.log(`Retrying validation (attempt ${retryCount + 2}/3)...`);
-          // Wait 2 seconds before retrying
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          const waitTime = 2000 + (retryCount * 1000); // Exponential backoff: 2s, 3s, 4s
+          console.log(`Retrying validation (attempt ${retryCount + 2}/3) after ${waitTime}ms...`);
+          setMessage({
+            type: "warning",
+            text: `${isAbortError ? "Request timeout" : "Connection error"}. Retrying (attempt ${retryCount + 2}/3)...`
+          });
+          // Wait before retrying with exponential backoff
+          await new Promise(resolve => setTimeout(resolve, waitTime));
           return validateData(fullData, retryCount + 1);
         }
 
         // All retries failed
         setMessage({
           type: "error",
-          text: "Validation failed after 3 attempts. Your connection may be unstable or the file is too large. Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking Upload anyway."
+          text: `Validation failed after 3 attempts (${isAbortError ? "timeout" : "connection error"}). Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking "Upload anyway"`
         });
       } else {
         setMessage({
