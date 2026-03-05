@@ -227,8 +227,9 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`Starting validation for ${dataRowCount} rows${attemptText} (minimal payload)`);
 
       const controller = new AbortController();
-      // Increase timeout based on data size: 5 seconds per 1000 rows, minimum 15 minutes, maximum 30 minutes
-      const estimatedTimeMs = Math.max(900000, Math.min(1800000, (dataRowCount / 1000) * 5000 + 600000));
+      // Increase timeout based on data size: 10 seconds per 1000 rows, minimum 30 seconds, maximum 60 minutes
+      const estimatedTimeMs = Math.max(30000, Math.min(3600000, (dataRowCount / 1000) * 10000 + 30000));
+      console.log(`⏱️ Setting validation timeout to ${(estimatedTimeMs / 1000).toFixed(0)} seconds for ${dataRowCount} rows`);
       const timeoutId = setTimeout(() => {
         console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
         controller.abort();
@@ -257,6 +258,8 @@ export default function UploadTab({ type }: UploadTabProps) {
 
       if (timeoutId) clearTimeout(timeoutId);
 
+      console.log(`Response received: status=${response.status}, ok=${response.ok}, headers=${JSON.stringify(Object.fromEntries(response.headers))}`);
+
       if (!response.ok) {
         let errorText = "Validation failed";
         let isRetryable = false;
@@ -264,7 +267,9 @@ export default function UploadTab({ type }: UploadTabProps) {
           const errorData = await response.json();
           errorText = errorData.error || errorText;
           isRetryable = errorData.retryable === true;
-        } catch (e) {}
+        } catch (e) {
+          console.error("Failed to parse error response:", e);
+        }
 
         // Retry if the error is retryable and we haven't exceeded retry limit
         if (isRetryable && retryCount < 2) {
@@ -278,7 +283,14 @@ export default function UploadTab({ type }: UploadTabProps) {
         return;
       }
 
-      const result = await response.json();
+      let result;
+      try {
+        result = await response.json();
+        console.log(`Validation response parsed: validCount=${result.validCount}, invalidCount=${result.invalidCount}`);
+      } catch (parseError) {
+        console.error("Failed to parse validation response:", parseError);
+        throw new Error("Failed to parse validation response: " + String(parseError));
+      }
 
       if (result.invalidCount > 0) {
         // Map minimal row data back to original row data for display
@@ -309,10 +321,14 @@ export default function UploadTab({ type }: UploadTabProps) {
       setIsValidating(false);
     } catch (error) {
       console.error("Validation error:", error);
+      console.error("Error stack:", error instanceof Error ? error.stack : "No stack trace");
 
       const isFetchError = error instanceof TypeError && error.message.includes("Failed to fetch");
       const isAbortError = error instanceof Error && error.name === "AbortError";
       const isNetworkError = isFetchError || isAbortError;
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error classification:", { isFetchError, isAbortError, isNetworkError, errorMessage });
 
       // Retry logic for network errors
       if (isNetworkError) {
@@ -336,7 +352,7 @@ export default function UploadTab({ type }: UploadTabProps) {
       } else {
         setMessage({
           type: "error",
-          text: `Validation failed: ${error instanceof Error ? error.message : "Unknown error"}. You can still try uploading without validation.`
+          text: `Validation failed: ${errorMessage}. You can still try uploading without validation.`
         });
       }
       setIsValidating(false);

@@ -33,14 +33,12 @@ export default defineConfig(({ mode }) => ({
 
 function expressPlugin(): Plugin {
   let app: any;
-  let serverReady = false;
 
   return {
     name: "express-plugin",
     apply: "serve",
     configureServer(server) {
       app = createServer();
-      serverReady = true;
 
       console.log("✅ Express app created and ready to handle requests");
 
@@ -50,16 +48,27 @@ function expressPlugin(): Plugin {
 
         // Only let Express handle /api routes
         if (url.startsWith("/api")) {
-          // Log the request for debugging
-          console.log(`🔗 Express handling: ${req.method} ${url}`);
-
           try {
-            // Call the Express app as middleware
-            // The Express app will handle the request and response
-            return app(req, res);
+            // Invoke Express app with proper next callback
+            // This allows Express to complete the request/response cycle
+            return app(req, res, (err?: any) => {
+              // If Express middleware chain ends without handling, call Vite's next
+              if (err) {
+                console.error("❌ Express error:", err);
+                if (!res.headersSent) {
+                  res.statusCode = 500;
+                  res.setHeader("Content-Type", "application/json");
+                  res.end(JSON.stringify({ error: "Internal Server Error" }));
+                }
+              } else if (!res.headersSent) {
+                // No error but also no response sent - 404
+                res.statusCode = 404;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "Not Found" }));
+              }
+            });
           } catch (error) {
             console.error("❌ Error in Express middleware for", url, ":", error);
-            // If there's an error and headers haven't been sent, try to send error response
             if (!res.headersSent) {
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
