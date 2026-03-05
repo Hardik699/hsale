@@ -24,9 +24,9 @@ async function getDatabase(): Promise<Db> {
     try {
       const client = new MongoClient(MONGODB_URI, {
         maxPoolSize: 10,
-        serverSelectionTimeoutMS: 5000,
-        connectTimeoutMS: 10000,
-        socketTimeoutMS: 30000,
+        serverSelectionTimeoutMS: 10000, // Increased from 5s to give more time to connect
+        connectTimeoutMS: 15000, // Increased from 10s for slower connections
+        socketTimeoutMS: 600000, // 10 minutes - increased from 30s to handle large uploads
         family: 4, // Use IPv4
       });
 
@@ -395,8 +395,18 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
 
     // Get all items and build SAP code map
     console.log("📊 Fetching items to build SAP code map...");
-    const items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
-    console.log(`✅ Found ${items.length} items`);
+    let items;
+    try {
+      items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
+      console.log(`✅ Found ${items.length} items`);
+    } catch (dbError) {
+      console.error("❌ Database error while fetching items:", dbError);
+      const errorMsg = dbError instanceof Error ? dbError.message : "Database connection failed";
+      return res.status(503).json({
+        error: `Database query failed: ${errorMsg}. Please try again.`,
+        retryable: true
+      });
+    }
 
     const sapCodeMap: { [key: string]: boolean } = {};
 
@@ -486,17 +496,37 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
     console.log(`✅ Validation complete in ${elapsedTime}s: ${validCount} valid, ${invalidCount} invalid rows`);
     console.log(`📦 Response payload: ${validRows.length} valid rows, ${invalidRows.length} invalid rows in response`);
 
-    res.json({
+    const responsePayload = {
       success: true,
       validCount,
       invalidCount,
       validRows,
       invalidRows,
-    });
+    };
+
+    // Log response size
+    const responseSize = JSON.stringify(responsePayload).length;
+    console.log(`📊 Response payload size: ${(responseSize / 1024).toFixed(2)} KB`);
+
+    res.setHeader('Content-Type', 'application/json');
+    res.json(responsePayload);
   } catch (error) {
     console.error("❌ Validation error:", error);
     const errorMessage = error instanceof Error ? error.message : "Failed to validate data";
-    res.status(500).json({ error: errorMessage });
+    const errorType = error instanceof Error ? error.name : "Unknown";
+
+    // Log detailed error information for debugging
+    console.error(`Error type: ${errorType}`);
+    if (error instanceof Error) {
+      console.error(`Stack: ${error.stack}`);
+    }
+
+    // Return 500 with retryable flag so client can retry
+    res.status(500).json({
+      error: `Validation error: ${errorMessage}. Please try again.`,
+      retryable: true,
+      errorType
+    });
   }
 };
 

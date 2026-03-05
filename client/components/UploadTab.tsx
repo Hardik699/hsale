@@ -227,8 +227,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`Starting validation for ${dataRowCount} rows${attemptText} (minimal payload)`);
 
       const controller = new AbortController();
-      // Increase timeout based on data size: 3 seconds per 1000 rows, minimum 15 minutes
-      const estimatedTimeMs = Math.max(900000, (dataRowCount / 1000) * 3000 + 600000);
+      // Increase timeout based on data size: 5 seconds per 1000 rows, minimum 15 minutes, maximum 30 minutes
+      const estimatedTimeMs = Math.max(900000, Math.min(1800000, (dataRowCount / 1000) * 5000 + 600000));
       const timeoutId = setTimeout(() => {
         console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
         controller.abort();
@@ -259,10 +259,19 @@ export default function UploadTab({ type }: UploadTabProps) {
 
       if (!response.ok) {
         let errorText = "Validation failed";
+        let isRetryable = false;
         try {
           const errorData = await response.json();
           errorText = errorData.error || errorText;
+          isRetryable = errorData.retryable === true;
         } catch (e) {}
+
+        // Retry if the error is retryable and we haven't exceeded retry limit
+        if (isRetryable && retryCount < 2) {
+          console.log(`Server returned retryable error (attempt ${retryCount + 2}/3). Retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          return validateData(fullData, retryCount + 1);
+        }
 
         setMessage({ type: "error", text: errorText });
         setIsValidating(false);
@@ -301,21 +310,28 @@ export default function UploadTab({ type }: UploadTabProps) {
     } catch (error) {
       console.error("Validation error:", error);
 
-      // Retry logic for network errors
-      if ((error instanceof TypeError && error.message === "Failed to fetch") ||
-          (error instanceof Error && error.name === "AbortError")) {
+      const isFetchError = error instanceof TypeError && error.message.includes("Failed to fetch");
+      const isAbortError = error instanceof Error && error.name === "AbortError";
+      const isNetworkError = isFetchError || isAbortError;
 
+      // Retry logic for network errors
+      if (isNetworkError) {
         if (retryCount < 2) {
-          console.log(`Retrying validation (attempt ${retryCount + 2}/3)...`);
-          // Wait 2 seconds before retrying
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          const waitTime = 2000 + (retryCount * 1000); // Exponential backoff: 2s, 3s, 4s
+          console.log(`Retrying validation (attempt ${retryCount + 2}/3) after ${waitTime}ms...`);
+          setMessage({
+            type: "warning",
+            text: `${isAbortError ? "Request timeout" : "Connection error"}. Retrying (attempt ${retryCount + 2}/3)...`
+          });
+          // Wait before retrying with exponential backoff
+          await new Promise(resolve => setTimeout(resolve, waitTime));
           return validateData(fullData, retryCount + 1);
         }
 
         // All retries failed
         setMessage({
           type: "error",
-          text: "Validation failed after 3 attempts. Your connection may be unstable or the file is too large. Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking Upload anyway."
+          text: `Validation failed after 3 attempts (${isAbortError ? "timeout" : "connection error"}). Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking "Upload anyway"`
         });
       } else {
         setMessage({
@@ -324,6 +340,92 @@ export default function UploadTab({ type }: UploadTabProps) {
         });
       }
       setIsValidating(false);
+    }
+  };
+
+  // Optimized chunked upload for better speed and reliability
+  const uploadInChunks = async (
+    uploadBody: any,
+    isUpdate: boolean = false
+  ): Promise<boolean> => {
+    const totalRows = uploadBody.rows;
+    const CHUNK_SIZE = 5000; // Upload 5000 rows per chunk for optimal speed
+    const data = uploadBody.data as any[];
+    const headers = data[0];
+    const dataRows = data.slice(1);
+
+    console.log(`📦 Starting chunked upload: ${totalRows} total rows, chunk size: ${CHUNK_SIZE}`);
+
+    // Calculate number of chunks
+    const numChunks = Math.ceil(dataRows.length / CHUNK_SIZE);
+
+    try {
+      for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
+        const startIdx = chunkIndex * CHUNK_SIZE;
+        const endIdx = Math.min(startIdx + CHUNK_SIZE, dataRows.length);
+        const chunkData = dataRows.slice(startIdx, endIdx);
+        const chunkRows = chunkData.length;
+
+        console.log(`📤 Uploading chunk ${chunkIndex + 1}/${numChunks} (rows ${startIdx + 2}-${endIdx + 1})`);
+
+        // Prepare chunk body
+        const chunkBody = {
+          ...uploadBody,
+          data: [headers, ...chunkData],
+          rows: chunkRows,
+          chunkIndex,
+          totalChunks: numChunks,
+          isChunked: numChunks > 1
+        };
+
+        // Only use validRowIndices for first chunk
+        if (chunkIndex > 0) {
+          delete chunkBody.validRowIndices;
+        }
+
+        const controller = new AbortController();
+        const timeoutMs = 120000; // 2 minutes per chunk
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+          const method = isUpdate && chunkIndex === 0 ? "PUT" : "POST";
+          const endpoint = isUpdate && chunkIndex === 0 ? "/api/upload" : "/api/upload/chunk";
+
+          const response = await fetch(endpoint, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(chunkBody),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            let errorText = "Chunk upload failed";
+            try {
+              const errorData = await response.json();
+              errorText = errorData.error || errorText;
+            } catch (e) {}
+            throw new Error(`${errorText} (chunk ${chunkIndex + 1}/${numChunks})`);
+          }
+
+          // Update progress
+          const progress = Math.round(((chunkIndex + 1) / numChunks) * 100);
+          setUploadProgress(progress);
+          setMessage({
+            type: "warning",
+            text: `Uploading... ${progress}% complete (Chunk ${chunkIndex + 1}/${numChunks})`
+          });
+        } catch (chunkError) {
+          console.error(`❌ Chunk ${chunkIndex + 1} failed:`, chunkError);
+          throw chunkError;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error("❌ Chunked upload failed:", error);
+      throw error;
     }
   };
 
@@ -336,10 +438,10 @@ export default function UploadTab({ type }: UploadTabProps) {
     setIsLoading(true);
     setUploadProgress(0);
     setMessage({ type: "warning", text: `Uploading ${fileData.rows} rows... Please wait.` });
-    simulateProgress(5000);
 
     try {
-      console.log("Starting upload for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
+      const startTime = Date.now();
+      console.log("🚀 Starting optimized upload for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
       // Prepare upload body
       const uploadBody: any = {
@@ -356,65 +458,84 @@ export default function UploadTab({ type }: UploadTabProps) {
         uploadBody.validRowIndices = selectedValidRowIndices;
       }
 
-      const controller = new AbortController();
-      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
-      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
-      const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
-
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(uploadBody),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      console.log("Upload response status:", response.status);
-
+      // Use chunked upload for large files (>1000 rows), single request for small files
       let result;
-      try {
+      if (fileData.rows > 1000) {
+        await uploadInChunks(uploadBody, false);
+        // After all chunks uploaded successfully, finalize
+        const finalizeResponse = await fetch("/api/upload/finalize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type,
+            year: selectedYear,
+            month: selectedMonth
+          })
+        });
+
+        if (!finalizeResponse.ok) {
+          throw new Error("Failed to finalize upload");
+        }
+        result = await finalizeResponse.json();
+      } else {
+        // Small file - use single request
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
+
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(uploadBody),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok && response.status !== 409) {
+          throw new Error(`Upload failed with status ${response.status}`);
+        }
+
         result = await response.json();
-      } catch (parseError) {
-        console.error("Failed to parse response:", parseError);
-        result = { error: "Invalid response from server" };
+
+        if (response.status === 409) {
+          setIsLoading(false);
+          setShowConfirmDialog(true);
+          setMessage(null);
+          return;
+        }
       }
 
-      if (response.status === 409) {
-        setIsLoading(false);
-        setShowConfirmDialog(true);
-        setMessage(null);
-      } else if (response.ok) {
-        setUploadProgress(100);
-        setMessage({ type: "success", text: "Data uploaded successfully!" });
-        setFileData(null);
-        setSelectedMonth(null);
-        setShowUploadForm(false);
-        setIsLoading(false);
+      const elapsedMs = Date.now() - startTime;
+      const speedRowsPerSec = Math.round((fileData.rows / elapsedMs) * 1000);
 
-        // Fetch updated status to refresh table immediately
-        try {
-          const statusResponse = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`);
-          if (statusResponse.ok) {
-            const data = await statusResponse.json();
-            if (data.data) {
-              setMonthsStatus(data.data);
-            }
+      setUploadProgress(100);
+      setMessage({
+        type: "success",
+        text: `✅ Uploaded ${fileData.rows.toLocaleString()} rows in ${(elapsedMs / 1000).toFixed(1)}s (${speedRowsPerSec} rows/sec)`
+      });
+
+      setFileData(null);
+      setSelectedMonth(null);
+      setShowUploadForm(false);
+      setIsLoading(false);
+
+      // Fetch updated status to refresh table immediately
+      try {
+        const statusResponse = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`);
+        if (statusResponse.ok) {
+          const data = await statusResponse.json();
+          if (data.data) {
+            setMonthsStatus(data.data);
           }
-        } catch (statusError) {
-          console.error("Failed to refresh status:", statusError);
         }
-      } else {
-        const errorText = result.error || `Upload failed with status ${response.status}`;
-        console.error("Upload failed:", errorText);
-        setMessage({ type: "error", text: errorText });
-        setIsLoading(false);
+      } catch (statusError) {
+        console.error("Failed to refresh status:", statusError);
       }
     } catch (error) {
       console.error("Upload error:", error);
       setIsLoading(false);
 
-      if (error instanceof TypeError && error.message === "Failed to fetch") {
+      if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
         setMessage({
           type: "error",
           text: "Cannot connect to server. Please check your internet connection and try again."
@@ -422,12 +543,13 @@ export default function UploadTab({ type }: UploadTabProps) {
       } else if (error instanceof Error && error.name === "AbortError") {
         setMessage({
           type: "error",
-          text: "Upload took too long and was cancelled. The file is very large or your connection is slow. Please try again with a smaller file or better connection."
+          text: "Upload chunk timed out. Please try again or use a smaller file."
         });
       } else {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
         setMessage({
           type: "error",
-          text: `Error: ${error instanceof Error ? error.message : "Unknown error during upload"}`
+          text: `Upload failed: ${errorMsg}`
         });
       }
     }
@@ -442,10 +564,10 @@ export default function UploadTab({ type }: UploadTabProps) {
     setIsUpdatingExisting(true);
     setUploadProgress(0);
     setMessage({ type: "warning", text: `Updating ${fileData.rows} rows... Please wait.` });
-    simulateProgress(5000);
 
     try {
-      console.log("Updating existing data for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
+      const startTime = Date.now();
+      console.log("🔄 Starting optimized update for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
       // Prepare update body
       const updateBody: any = {
@@ -462,64 +584,79 @@ export default function UploadTab({ type }: UploadTabProps) {
         updateBody.validRowIndices = selectedValidRowIndices;
       }
 
-      const controller = new AbortController();
-      // Timeout based on file size: 2 seconds per 100 rows, minimum 5 minutes, maximum 20 minutes
-      const estimatedTimeMs = Math.max(300000, Math.min(1200000, (fileData.rows / 100) * 2000));
-      const timeoutId = setTimeout(() => controller.abort(), estimatedTimeMs);
-
-      const response = await fetch("/api/upload", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updateBody),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      console.log("Update response status:", response.status);
-
+      // Use chunked upload for large files (>1000 rows), single request for small files
       let result;
-      try {
+      if (fileData.rows > 1000) {
+        await uploadInChunks(updateBody, true);
+        // After all chunks uploaded successfully, finalize
+        const finalizeResponse = await fetch("/api/upload/finalize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type,
+            year: selectedYear,
+            month: selectedMonth,
+            isUpdate: true
+          })
+        });
+
+        if (!finalizeResponse.ok) {
+          throw new Error("Failed to finalize update");
+        }
+        result = await finalizeResponse.json();
+      } else {
+        // Small file - use single request
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
+
+        const response = await fetch("/api/upload", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updateBody),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`Update failed with status ${response.status}`);
+        }
         result = await response.json();
-      } catch (parseError) {
-        console.error("Failed to parse response:", parseError);
-        result = { error: "Invalid response from server" };
       }
 
-      if (response.ok) {
-        setUploadProgress(100);
-        setShowConfirmDialog(false);
-        setMessage({ type: "success", text: "Data updated successfully!" });
-        setFileData(null);
-        setSelectedMonth(null);
-        setShowUploadForm(false);
-        setIsUpdatingExisting(false);
+      const elapsedMs = Date.now() - startTime;
+      const speedRowsPerSec = Math.round((fileData.rows / elapsedMs) * 1000);
 
-        // Fetch updated status to refresh table immediately
-        try {
-          const statusResponse = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`);
-          if (statusResponse.ok) {
-            const data = await statusResponse.json();
-            if (data.data) {
-              setMonthsStatus(data.data);
-            }
+      setUploadProgress(100);
+      setShowConfirmDialog(false);
+      setMessage({
+        type: "success",
+        text: `✅ Updated ${fileData.rows.toLocaleString()} rows in ${(elapsedMs / 1000).toFixed(1)}s (${speedRowsPerSec} rows/sec)`
+      });
+
+      setFileData(null);
+      setSelectedMonth(null);
+      setShowUploadForm(false);
+      setIsUpdatingExisting(false);
+
+      // Fetch updated status to refresh table immediately
+      try {
+        const statusResponse = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`);
+        if (statusResponse.ok) {
+          const data = await statusResponse.json();
+          if (data.data) {
+            setMonthsStatus(data.data);
           }
-        } catch (statusError) {
-          console.error("Failed to refresh status:", statusError);
         }
-      } else {
-        const errorText = result.error || `Update failed with status ${response.status}`;
-        console.error("Update failed:", errorText);
-        setMessage({ type: "error", text: errorText });
-        setShowConfirmDialog(false);
-        setIsUpdatingExisting(false);
+      } catch (statusError) {
+        console.error("Failed to refresh status:", statusError);
       }
     } catch (error) {
       console.error("Update error:", error);
       setShowConfirmDialog(false);
       setIsUpdatingExisting(false);
 
-      if (error instanceof TypeError && error.message === "Failed to fetch") {
+      if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
         setMessage({
           type: "error",
           text: "Cannot connect to server. Please check your internet connection and try again."
@@ -527,12 +664,13 @@ export default function UploadTab({ type }: UploadTabProps) {
       } else if (error instanceof Error && error.name === "AbortError") {
         setMessage({
           type: "error",
-          text: "Update took too long and was cancelled. The file is very large or your connection is slow. Please try again with a smaller file or better connection."
+          text: "Update chunk timed out. Please try again or use a smaller file."
         });
       } else {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
         setMessage({
           type: "error",
-          text: `Error: ${error instanceof Error ? error.message : "Unknown error during update"}`
+          text: `Update failed: ${errorMsg}`
         });
       }
     }
