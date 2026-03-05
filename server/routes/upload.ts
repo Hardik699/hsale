@@ -10,6 +10,32 @@ let cachedClient: MongoClient | null = null;
 let cachedDb: Db | null = null;
 let connectionPromise: Promise<Db> | null = null;
 
+// Temporary storage for chunks during chunked uploads
+const chunkStorage: { [key: string]: { chunks: any[]; totalChunks: number; metadata: any; timestamp: number } } = {};
+
+// Cache SAP code map with TTL (5 minutes)
+let sapCodeMapCache: { map: Set<string>; timestamp: number } | null = null;
+const SAP_CODE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Cleanup old chunk uploads every 30 minutes (older than 2 hours)
+setInterval(() => {
+  const now = Date.now();
+  const TWO_HOURS = 2 * 60 * 60 * 1000;
+
+  for (const key in chunkStorage) {
+    if (now - chunkStorage[key].timestamp > TWO_HOURS) {
+      console.log(`🧹 Cleaning up expired chunk storage for ${key}`);
+      delete chunkStorage[key];
+    }
+  }
+
+  // Also clear SAP code cache if older than TTL
+  if (sapCodeMapCache && now - sapCodeMapCache.timestamp > SAP_CODE_CACHE_TTL) {
+    console.log(`🧹 Clearing SAP code map cache`);
+    sapCodeMapCache = null;
+  }
+}, 30 * 60 * 1000);
+
 async function getDatabase(): Promise<Db> {
   if (cachedDb) {
     return cachedDb;
@@ -43,6 +69,48 @@ async function getDatabase(): Promise<Db> {
   })();
 
   return connectionPromise;
+}
+
+// Get cached SAP code map with TTL
+async function getSAPCodeMap(): Promise<Set<string>> {
+  const now = Date.now();
+
+  // Return cached map if still valid
+  if (sapCodeMapCache && now - sapCodeMapCache.timestamp < SAP_CODE_CACHE_TTL) {
+    console.log(`✅ Using cached SAP code map (${sapCodeMapCache.map.size} codes)`);
+    return sapCodeMapCache.map;
+  }
+
+  console.log(`🔄 Fetching fresh SAP code map from database...`);
+  const db = await getDatabase();
+  const itemsCollection = db.collection("items");
+
+  try {
+    const items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
+    const sapCodeSet = new Set<string>();
+
+    for (const item of items) {
+      if (item.variations && Array.isArray(item.variations)) {
+        item.variations.forEach((v: any) => {
+          if (v.sapCode) {
+            sapCodeSet.add(v.sapCode.trim());
+          }
+        });
+      }
+    }
+
+    // Cache the result
+    sapCodeMapCache = {
+      map: sapCodeSet,
+      timestamp: now
+    };
+
+    console.log(`✅ Built SAP code map with ${sapCodeSet.size} codes`);
+    return sapCodeSet;
+  } catch (error) {
+    console.error("❌ Error fetching SAP codes:", error);
+    throw error;
+  }
 }
 
 // Helper function to normalize area to lowercase
@@ -159,7 +227,7 @@ function parseDate(dateStr: string): Date | null {
 
 export const handleUpload: RequestHandler = async (req, res) => {
   try {
-    const { type, year, month, data, rows, columns, validRowIndices } = req.body;
+    const { type, year, month, data, rows, columns, validRowIndices, chunkIndex, totalChunks, isChunked } = req.body;
 
     if (!type || !year || !month || !data || !rows || !columns) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -179,6 +247,54 @@ export const handleUpload: RequestHandler = async (req, res) => {
       return res.status(400).json({ error: "Invalid data format" });
     }
 
+    // Check if this is a chunk (PUT /api/upload is used for first chunk of chunked updates)
+    if (chunkIndex !== undefined && totalChunks !== undefined) {
+      console.log(`📦 Received chunk ${chunkIndex + 1}/${totalChunks} at /api/upload for ${type}/${year}/${month}`);
+
+      const storageKey = `${type}_${year}_${month}`;
+
+      // Initialize storage for this upload if it doesn't exist
+      if (!chunkStorage[storageKey]) {
+        chunkStorage[storageKey] = {
+          chunks: [],
+          totalChunks,
+          metadata: {
+            type,
+            year,
+            month,
+            columns,
+            validRowIndices: chunkIndex === 0 ? validRowIndices : undefined
+          },
+          timestamp: Date.now()
+        };
+      }
+
+      // Store the chunk (first chunk includes headers)
+      const headers = chunkIndex === 0 ? data[0] : null;
+      if (chunkIndex === 0) {
+        chunkStorage[storageKey].metadata.headers = headers;
+      }
+
+      chunkStorage[storageKey].chunks[chunkIndex] = {
+        index: chunkIndex,
+        data: data.slice(1), // Remove headers
+        rows
+      };
+
+      const receivedChunks = chunkStorage[storageKey].chunks.filter(c => c !== undefined).length;
+      console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} stored at /api/upload. Progress: ${receivedChunks}/${totalChunks}`);
+
+      return res.json({
+        success: true,
+        message: `Chunk ${chunkIndex + 1}/${totalChunks} received`,
+        chunkIndex,
+        allChunksReceived: receivedChunks === totalChunks,
+        receivedChunks,
+        totalChunks
+      });
+    }
+
+    // Non-chunked upload logic below
     const headers = data[0] as string[];
     const validation = validateFileFormat(headers, type as any);
 
@@ -222,8 +338,15 @@ export const handleUpload: RequestHandler = async (req, res) => {
       status: "uploaded"
     });
 
-    // Data is stored in petpooja collection and will be fetched directly from DB when needed
-    // No need to process and duplicate data in item variations
+    // Process and create items from petpooja data
+    if (type === "petpooja") {
+      try {
+        await processAndCreateItemsFromPetpooja(db, finalData);
+      } catch (itemError) {
+        console.error("⚠️ Warning: Failed to auto-create items from upload:", itemError);
+        // Don't fail the upload if item creation fails
+      }
+    }
 
     res.json({
       success: true,
@@ -286,12 +409,61 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
 
 export const handleUpdateUpload: RequestHandler = async (req, res) => {
   try {
-    const { type, year, month, data, rows, columns, validRowIndices } = req.body;
+    const { type, year, month, data, rows, columns, validRowIndices, chunkIndex, totalChunks, isChunked } = req.body;
 
     if (!type || !year || !month || !data) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    // Check if this is a chunk (PUT /api/upload is used for first chunk of chunked updates)
+    if (chunkIndex !== undefined && totalChunks !== undefined) {
+      console.log(`📦 Received update chunk ${chunkIndex + 1}/${totalChunks} at PUT /api/upload for ${type}/${year}/${month}`);
+
+      const storageKey = `${type}_${year}_${month}`;
+
+      // Initialize storage for this upload if it doesn't exist
+      if (!chunkStorage[storageKey]) {
+        chunkStorage[storageKey] = {
+          chunks: [],
+          totalChunks,
+          metadata: {
+            type,
+            year,
+            month,
+            columns,
+            validRowIndices: chunkIndex === 0 ? validRowIndices : undefined,
+            isUpdate: true
+          },
+          timestamp: Date.now()
+        };
+      }
+
+      // Store the chunk (first chunk includes headers)
+      const headers = chunkIndex === 0 ? data[0] : null;
+      if (chunkIndex === 0) {
+        chunkStorage[storageKey].metadata.headers = headers;
+      }
+
+      chunkStorage[storageKey].chunks[chunkIndex] = {
+        index: chunkIndex,
+        data: data.slice(1), // Remove headers
+        rows
+      };
+
+      const receivedChunks = chunkStorage[storageKey].chunks.filter(c => c !== undefined).length;
+      console.log(`✅ Update chunk ${chunkIndex + 1}/${totalChunks} stored. Progress: ${receivedChunks}/${totalChunks}`);
+
+      return res.json({
+        success: true,
+        message: `Update chunk ${chunkIndex + 1}/${totalChunks} received`,
+        chunkIndex,
+        allChunksReceived: receivedChunks === totalChunks,
+        receivedChunks,
+        totalChunks
+      });
+    }
+
+    // Non-chunked update logic below
     // Filter data if validRowIndices provided
     let finalData = data;
     let finalRows = rows;
@@ -389,38 +561,19 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
       });
     }
 
-    console.log("🔗 Connecting to database for validation...");
-    const db = await getDatabase();
-    const itemsCollection = db.collection("items");
+    console.log("🔗 Fetching SAP code map for validation...");
 
-    // Get all items and build SAP code map
-    console.log("📊 Fetching items to build SAP code map...");
-    let items;
+    let sapCodeSet: Set<string>;
     try {
-      items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
-      console.log(`✅ Found ${items.length} items`);
+      sapCodeSet = await getSAPCodeMap();
     } catch (dbError) {
-      console.error("❌ Database error while fetching items:", dbError);
+      console.error("❌ Database error while fetching SAP codes:", dbError);
       const errorMsg = dbError instanceof Error ? dbError.message : "Database connection failed";
       return res.status(503).json({
         error: `Database query failed: ${errorMsg}. Please try again.`,
         retryable: true
       });
     }
-
-    const sapCodeMap: { [key: string]: boolean } = {};
-
-    for (const item of items) {
-      if (item.variations && Array.isArray(item.variations)) {
-        item.variations.forEach((v: any) => {
-          if (v.sapCode) {
-            sapCodeMap[v.sapCode.trim()] = true;
-          }
-        });
-      }
-    }
-
-    console.log(`🔍 Built SAP code map with ${Object.keys(sapCodeMap).length} codes`);
 
     const headers = data[0] as string[];
     const dataRows = data.slice(1);
@@ -468,7 +621,7 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
       } else if (!sapCode) {
         isValid = false;
         reason = "No SAP code found in row";
-      } else if (!sapCodeMap[sapCode]) {
+      } else if (!sapCodeSet.has(sapCode)) {
         isValid = false;
         reason = `SAP code "${sapCode}" not found in database`;
       }
@@ -572,6 +725,331 @@ export const handleDeleteUpload: RequestHandler = async (req, res) => {
   } catch (error) {
     console.error("❌ Delete error:", error);
     const errorMessage = error instanceof Error ? error.message : "Failed to delete data";
+    res.status(500).json({ error: errorMessage });
+  }
+};
+
+// POST /api/upload/chunk - Handle chunked uploads
+export const handleChunkUpload: RequestHandler = async (req, res) => {
+  try {
+    const { type, year, month, data, rows, columns, chunkIndex, totalChunks, isChunked, validRowIndices } = req.body;
+
+    // Validate required fields
+    if (!type || !year || !month || !Array.isArray(data) || chunkIndex === undefined || totalChunks === undefined) {
+      return res.status(400).json({ error: "Missing required chunk fields" });
+    }
+
+    const storageKey = `${type}_${year}_${month}`;
+
+    console.log(`📦 Received chunk ${chunkIndex + 1}/${totalChunks} for ${storageKey} (${rows} rows)`);
+
+    // Initialize storage for this upload if it doesn't exist
+    if (!chunkStorage[storageKey]) {
+      chunkStorage[storageKey] = {
+        chunks: [],
+        totalChunks,
+        metadata: {
+          type,
+          year,
+          month,
+          columns,
+          validRowIndices: chunkIndex === 0 ? validRowIndices : undefined
+        },
+        timestamp: Date.now()
+      };
+    }
+
+    // Store the chunk (first chunk includes headers)
+    const headers = chunkIndex === 0 ? data[0] : null;
+    if (chunkIndex === 0) {
+      chunkStorage[storageKey].metadata.headers = headers;
+    }
+
+    chunkStorage[storageKey].chunks[chunkIndex] = {
+      index: chunkIndex,
+      data: data.slice(1), // Remove headers from chunk (they're the same for all chunks)
+      rows
+    };
+
+    const receivedChunks = chunkStorage[storageKey].chunks.filter(c => c !== undefined).length;
+    console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} stored. Progress: ${receivedChunks}/${totalChunks} chunks received`);
+
+    // Check if all chunks have been received
+    const allChunksReceived = receivedChunks === totalChunks;
+
+    res.json({
+      success: true,
+      message: `Chunk ${chunkIndex + 1}/${totalChunks} received`,
+      chunkIndex,
+      allChunksReceived,
+      receivedChunks,
+      totalChunks
+    });
+  } catch (error) {
+    console.error("❌ Chunk upload error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to upload chunk";
+    res.status(500).json({ error: errorMessage });
+  }
+};
+
+// Helper function to extract unique items from petpooja data and create items
+async function processAndCreateItemsFromPetpooja(db: Db, data: any[]): Promise<number> {
+  try {
+    console.log(`🔍 Processing petpooja data to extract and create items...`);
+
+    const headers = data[0] as string[];
+    const dataRows = data.slice(1);
+
+    // Find column indices
+    const getColumnIndex = (name: string) =>
+      headers.findIndex((h) => h?.toLowerCase().trim() === name.toLowerCase().trim());
+
+    const sapCodeIdx = getColumnIndex("sap_code");
+    const restaurantIdx = getColumnIndex("restaurant_name");
+
+    if (sapCodeIdx === -1) {
+      console.warn("⚠️ SAP code column not found, skipping item creation");
+      return 0;
+    }
+
+    // Extract unique SAP codes from the data
+    const sapCodeMap = new Map<string, Set<string>>(); // sapCode -> set of item names
+
+    for (const row of dataRows) {
+      if (!Array.isArray(row)) continue;
+
+      const sapCode = row[sapCodeIdx]?.toString().trim();
+      const itemName = restaurantIdx >= 0 ? row[restaurantIdx]?.toString().trim() : "Unknown";
+
+      if (sapCode && itemName) {
+        if (!sapCodeMap.has(sapCode)) {
+          sapCodeMap.set(sapCode, new Set());
+        }
+        sapCodeMap.get(sapCode)!.add(itemName);
+      }
+    }
+
+    console.log(`📊 Found ${sapCodeMap.size} unique SAP codes in upload data`);
+
+    const itemsCollection = db.collection("items");
+    let itemsCreated = 0;
+    let itemsUpdated = 0;
+
+    // Process each SAP code
+    for (const [sapCode, itemNames] of sapCodeMap.entries()) {
+      try {
+        // Check if item with this SAP code already exists
+        const existingVariation = await itemsCollection.findOne({
+          "variations.sapCode": sapCode
+        });
+
+        if (existingVariation) {
+          console.log(`  ✓ Item already has SAP code: ${sapCode}`);
+          itemsUpdated++;
+          continue;
+        }
+
+        // Create a new item for this SAP code if it doesn't exist
+        const itemName = Array.from(itemNames)[0]; // Use first occurrence as name
+        const shortCode = sapCode.substring(0, 3).toUpperCase();
+        const newItemId = `AUTO-${sapCode}-${Date.now()}`;
+
+        const newItem = {
+          itemId: newItemId,
+          name: itemName || "Imported Item",
+          shortCode: shortCode,
+          group: "Imported",
+          category: "Other",
+          itemType: "Goods",
+          basePrice: 0,
+          hsnCode: "",
+          gst: 0,
+          profitMargin: 0,
+          unitType: "pcs",
+          variations: [
+            {
+              id: `VAR-${Date.now()}`,
+              name: "Default Variation",
+              value: itemName || "Default",
+              basePrice: 0,
+              saleType: "QTY",
+              sapCode: sapCode,
+              prices: {
+                Zomato: 0,
+                Swiggy: 0,
+                GS1: 0
+              }
+            }
+          ],
+          createdAt: new Date(),
+          createdFrom: "upload"
+        };
+
+        await itemsCollection.insertOne(newItem);
+        console.log(`  ✅ Created new item: ${newItemId} with SAP code: ${sapCode}`);
+        itemsCreated++;
+      } catch (error) {
+        console.error(`  ❌ Error processing SAP code ${sapCode}:`, error);
+        // Continue with next SAP code on error
+      }
+    }
+
+    // Clear SAP code cache since we've added new items
+    sapCodeMapCache = null;
+    console.log(`✅ Item processing complete: ${itemsCreated} created, ${itemsUpdated} already exist`);
+
+    return itemsCreated + itemsUpdated;
+  } catch (error) {
+    console.error("❌ Error processing items from petpooja data:", error);
+    throw error;
+  }
+}
+
+// POST /api/upload/finalize - Finalize chunked upload by combining all chunks and saving to database
+export const handleFinalizeUpload: RequestHandler = async (req, res) => {
+  try {
+    const { type, year, month, isUpdate } = req.body;
+
+    if (!type || !year || !month) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const storageKey = `${type}_${year}_${month}`;
+
+    // Check if we have stored chunks for this upload
+    const uploadData = chunkStorage[storageKey];
+    if (!uploadData) {
+      return res.status(400).json({ error: "No chunked upload in progress for this month" });
+    }
+
+    console.log(`🔄 Finalizing upload for ${storageKey}`);
+
+    // Verify all chunks are present
+    const { chunks, totalChunks, metadata } = uploadData;
+    const receivedChunks = chunks.filter(c => c !== undefined).length;
+
+    if (receivedChunks !== totalChunks) {
+      return res.status(400).json({
+        error: `Missing chunks. Expected ${totalChunks}, received ${receivedChunks}`
+      });
+    }
+
+    // Combine all chunks efficiently
+    const combinedDataRows: any[] = [];
+    let totalRowsInChunks = 0;
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (!chunk) {
+        throw new Error(`Chunk ${i} is missing`);
+      }
+      // Use spread for small chunks, push for large data
+      if (chunk.data.length > 1000) {
+        combinedDataRows.push(...chunk.data);
+      } else {
+        for (const row of chunk.data) {
+          combinedDataRows.push(row);
+        }
+      }
+      totalRowsInChunks += chunk.rows;
+    }
+
+    console.log(`✅ Combined ${chunks.length} chunks into ${combinedDataRows.length} data rows`);
+
+    // Get headers from metadata (stored from first chunk)
+    const headers = metadata.headers || [];
+    const fullData = [headers, ...combinedDataRows];
+
+    // Get database and determine if this is insert or update
+    const db = await getDatabase();
+    const collection = db.collection(type);
+
+    let totalRows = combinedDataRows.length;
+    let finalData = fullData;
+
+    // Apply valid row indices if provided (filter invalid rows)
+    if (metadata.validRowIndices && Array.isArray(metadata.validRowIndices) && metadata.validRowIndices.length > 0) {
+      // The validRowIndices are based on the original full file row numbers (1-indexed from UI)
+      // Since we have just the data rows here (without original file structure),
+      // we need to filter them based on the indices
+      const validIndices = new Set(metadata.validRowIndices);
+      const filteredRows = combinedDataRows.filter((_, idx) => validIndices.has(idx + 2)); // +2 because row 0 is header, row 1 is first data row
+      finalData = [[], ...filteredRows];
+      totalRows = filteredRows.length;
+    }
+
+    // Handle insert or update
+    if (isUpdate) {
+      console.log(`🔄 Updating existing data for ${storageKey}`);
+      const result = await collection.updateOne(
+        { year, month },
+        {
+          $set: {
+            rows: totalRows,
+            columns: metadata.columns,
+            data: finalData,
+            updatedAt: new Date(),
+            status: "updated"
+          }
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ error: "Data not found for update" });
+      }
+
+      console.log(`✅ Update finalized for ${storageKey}: ${totalRows} rows`);
+    } else {
+      // Check if data already exists
+      const existingData = await collection.findOne({ year, month });
+      if (existingData) {
+        return res.status(409).json({
+          error: "Data already exists for this month",
+          exists: true
+        });
+      }
+
+      console.log(`💾 Inserting new data for ${storageKey}: ${totalRows} rows`);
+      await collection.insertOne({
+        year,
+        month,
+        rows: totalRows,
+        columns: metadata.columns,
+        data: finalData,
+        uploadedAt: new Date(),
+        status: "uploaded"
+      });
+
+      // Process and create items from petpooja data
+      if (type === "petpooja") {
+        try {
+          await processAndCreateItemsFromPetpooja(db, finalData);
+        } catch (itemError) {
+          console.error("⚠️ Warning: Failed to auto-create items from upload:", itemError);
+          // Don't fail the upload if item creation fails
+        }
+      }
+    }
+
+    // Clean up chunk storage
+    delete chunkStorage[storageKey];
+    console.log(`🧹 Cleaned up chunk storage for ${storageKey}`);
+
+    res.json({
+      success: true,
+      message: `Upload finalized successfully (${totalRows} rows)`,
+      rowsUploaded: totalRows
+    });
+  } catch (error) {
+    console.error("❌ Finalize error:", error);
+
+    // Clean up on error
+    const storageKey = `${req.body.type}_${req.body.year}_${req.body.month}`;
+    if (chunkStorage[storageKey]) {
+      delete chunkStorage[storageKey];
+    }
+
+    const errorMessage = error instanceof Error ? error.message : "Failed to finalize upload";
     res.status(500).json({ error: errorMessage });
   }
 };
