@@ -222,14 +222,19 @@ export default function UploadTab({ type }: UploadTabProps) {
         return [row[restaurantIdx], row[sapCodeIdx]];
       });
 
-      console.log(`Starting validation for ${minimalData.length - 1} rows (minimal payload)`);
+      const dataRowCount = minimalData.length - 1;
+      console.log(`Starting validation for ${dataRowCount} rows (minimal payload)`);
 
       const controller = new AbortController();
-      // 10 minutes timeout for validation (need extra time for large JSON parsing on server)
-      const timeoutId = setTimeout(() => controller.abort(), 600000);
+      // Increase timeout based on data size: 2 seconds per 1000 rows, minimum 10 minutes
+      const estimatedTimeMs = Math.max(600000, (dataRowCount / 1000) * 2000 + 300000);
+      const timeoutId = setTimeout(() => {
+        console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
+        controller.abort();
+      }, estimatedTimeMs);
 
       // Show that validation is in progress
-      setMessage({ type: "warning", text: "Validating data... This may take a moment for large files." });
+      setMessage({ type: "warning", text: `Validating ${dataRowCount.toLocaleString()} rows... This may take a moment for large files.` });
 
       const response = await fetch("/api/upload/validate", {
         method: "POST",
@@ -243,7 +248,7 @@ export default function UploadTab({ type }: UploadTabProps) {
         signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (!response.ok) {
         let errorText = "Validation failed";
@@ -291,12 +296,12 @@ export default function UploadTab({ type }: UploadTabProps) {
       if (error instanceof Error && error.name === "AbortError") {
         setMessage({
           type: "error",
-          text: "Validation took too long - file might be too large. Try uploading without validation or split into smaller batches."
+          text: "Validation request timed out or was aborted. The file might be too large or your connection is slow. Try uploading without validation or using a smaller file."
         });
       } else if (error instanceof TypeError && error.message === "Failed to fetch") {
         setMessage({
           type: "error",
-          text: "Connection failed during validation. Check your internet connection and try again."
+          text: "Connection failed during validation. This could be due to a network issue or large file size. Check your internet connection and try again."
         });
       } else {
         setMessage({
