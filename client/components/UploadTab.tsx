@@ -259,10 +259,19 @@ export default function UploadTab({ type }: UploadTabProps) {
 
       if (!response.ok) {
         let errorText = "Validation failed";
+        let isRetryable = false;
         try {
           const errorData = await response.json();
           errorText = errorData.error || errorText;
+          isRetryable = errorData.retryable === true;
         } catch (e) {}
+
+        // Retry if the error is retryable and we haven't exceeded retry limit
+        if (isRetryable && retryCount < 2) {
+          console.log(`Server returned retryable error (attempt ${retryCount + 2}/3). Retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          return validateData(fullData, retryCount + 1);
+        }
 
         setMessage({ type: "error", text: errorText });
         setIsValidating(false);

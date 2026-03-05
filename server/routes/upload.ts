@@ -395,8 +395,18 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
 
     // Get all items and build SAP code map
     console.log("📊 Fetching items to build SAP code map...");
-    const items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
-    console.log(`✅ Found ${items.length} items`);
+    let items;
+    try {
+      items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
+      console.log(`✅ Found ${items.length} items`);
+    } catch (dbError) {
+      console.error("❌ Database error while fetching items:", dbError);
+      const errorMsg = dbError instanceof Error ? dbError.message : "Database connection failed";
+      return res.status(503).json({
+        error: `Database query failed: ${errorMsg}. Please try again.`,
+        retryable: true
+      });
+    }
 
     const sapCodeMap: { [key: string]: boolean } = {};
 
