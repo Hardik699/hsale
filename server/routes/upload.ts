@@ -10,6 +10,22 @@ let cachedClient: MongoClient | null = null;
 let cachedDb: Db | null = null;
 let connectionPromise: Promise<Db> | null = null;
 
+// Temporary storage for chunks during chunked uploads
+const chunkStorage: { [key: string]: { chunks: any[]; totalChunks: number; metadata: any; timestamp: number } } = {};
+
+// Cleanup old chunk uploads every 30 minutes (older than 2 hours)
+setInterval(() => {
+  const now = Date.now();
+  const TWO_HOURS = 2 * 60 * 60 * 1000;
+
+  for (const key in chunkStorage) {
+    if (now - chunkStorage[key].timestamp > TWO_HOURS) {
+      console.log(`🧹 Cleaning up expired chunk storage for ${key}`);
+      delete chunkStorage[key];
+    }
+  }
+}, 30 * 60 * 1000);
+
 async function getDatabase(): Promise<Db> {
   if (cachedDb) {
     return cachedDb;
@@ -159,7 +175,7 @@ function parseDate(dateStr: string): Date | null {
 
 export const handleUpload: RequestHandler = async (req, res) => {
   try {
-    const { type, year, month, data, rows, columns, validRowIndices } = req.body;
+    const { type, year, month, data, rows, columns, validRowIndices, chunkIndex, totalChunks, isChunked } = req.body;
 
     if (!type || !year || !month || !data || !rows || !columns) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -179,6 +195,54 @@ export const handleUpload: RequestHandler = async (req, res) => {
       return res.status(400).json({ error: "Invalid data format" });
     }
 
+    // Check if this is a chunk (PUT /api/upload is used for first chunk of chunked updates)
+    if (chunkIndex !== undefined && totalChunks !== undefined) {
+      console.log(`📦 Received chunk ${chunkIndex + 1}/${totalChunks} at /api/upload for ${type}/${year}/${month}`);
+
+      const storageKey = `${type}_${year}_${month}`;
+
+      // Initialize storage for this upload if it doesn't exist
+      if (!chunkStorage[storageKey]) {
+        chunkStorage[storageKey] = {
+          chunks: [],
+          totalChunks,
+          metadata: {
+            type,
+            year,
+            month,
+            columns,
+            validRowIndices: chunkIndex === 0 ? validRowIndices : undefined
+          },
+          timestamp: Date.now()
+        };
+      }
+
+      // Store the chunk (first chunk includes headers)
+      const headers = chunkIndex === 0 ? data[0] : null;
+      if (chunkIndex === 0) {
+        chunkStorage[storageKey].metadata.headers = headers;
+      }
+
+      chunkStorage[storageKey].chunks[chunkIndex] = {
+        index: chunkIndex,
+        data: data.slice(1), // Remove headers
+        rows
+      };
+
+      const receivedChunks = chunkStorage[storageKey].chunks.filter(c => c !== undefined).length;
+      console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} stored at /api/upload. Progress: ${receivedChunks}/${totalChunks}`);
+
+      return res.json({
+        success: true,
+        message: `Chunk ${chunkIndex + 1}/${totalChunks} received`,
+        chunkIndex,
+        allChunksReceived: receivedChunks === totalChunks,
+        receivedChunks,
+        totalChunks
+      });
+    }
+
+    // Non-chunked upload logic below
     const headers = data[0] as string[];
     const validation = validateFileFormat(headers, type as any);
 
@@ -286,12 +350,61 @@ export const handleGetUploads: RequestHandler = async (req, res) => {
 
 export const handleUpdateUpload: RequestHandler = async (req, res) => {
   try {
-    const { type, year, month, data, rows, columns, validRowIndices } = req.body;
+    const { type, year, month, data, rows, columns, validRowIndices, chunkIndex, totalChunks, isChunked } = req.body;
 
     if (!type || !year || !month || !data) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    // Check if this is a chunk (PUT /api/upload is used for first chunk of chunked updates)
+    if (chunkIndex !== undefined && totalChunks !== undefined) {
+      console.log(`📦 Received update chunk ${chunkIndex + 1}/${totalChunks} at PUT /api/upload for ${type}/${year}/${month}`);
+
+      const storageKey = `${type}_${year}_${month}`;
+
+      // Initialize storage for this upload if it doesn't exist
+      if (!chunkStorage[storageKey]) {
+        chunkStorage[storageKey] = {
+          chunks: [],
+          totalChunks,
+          metadata: {
+            type,
+            year,
+            month,
+            columns,
+            validRowIndices: chunkIndex === 0 ? validRowIndices : undefined,
+            isUpdate: true
+          },
+          timestamp: Date.now()
+        };
+      }
+
+      // Store the chunk (first chunk includes headers)
+      const headers = chunkIndex === 0 ? data[0] : null;
+      if (chunkIndex === 0) {
+        chunkStorage[storageKey].metadata.headers = headers;
+      }
+
+      chunkStorage[storageKey].chunks[chunkIndex] = {
+        index: chunkIndex,
+        data: data.slice(1), // Remove headers
+        rows
+      };
+
+      const receivedChunks = chunkStorage[storageKey].chunks.filter(c => c !== undefined).length;
+      console.log(`✅ Update chunk ${chunkIndex + 1}/${totalChunks} stored. Progress: ${receivedChunks}/${totalChunks}`);
+
+      return res.json({
+        success: true,
+        message: `Update chunk ${chunkIndex + 1}/${totalChunks} received`,
+        chunkIndex,
+        allChunksReceived: receivedChunks === totalChunks,
+        receivedChunks,
+        totalChunks
+      });
+    }
+
+    // Non-chunked update logic below
     // Filter data if validRowIndices provided
     let finalData = data;
     let finalRows = rows;
@@ -572,6 +685,197 @@ export const handleDeleteUpload: RequestHandler = async (req, res) => {
   } catch (error) {
     console.error("❌ Delete error:", error);
     const errorMessage = error instanceof Error ? error.message : "Failed to delete data";
+    res.status(500).json({ error: errorMessage });
+  }
+};
+
+// POST /api/upload/chunk - Handle chunked uploads
+export const handleChunkUpload: RequestHandler = async (req, res) => {
+  try {
+    const { type, year, month, data, rows, columns, chunkIndex, totalChunks, isChunked, validRowIndices } = req.body;
+
+    // Validate required fields
+    if (!type || !year || !month || !Array.isArray(data) || chunkIndex === undefined || totalChunks === undefined) {
+      return res.status(400).json({ error: "Missing required chunk fields" });
+    }
+
+    const storageKey = `${type}_${year}_${month}`;
+
+    console.log(`📦 Received chunk ${chunkIndex + 1}/${totalChunks} for ${storageKey} (${rows} rows)`);
+
+    // Initialize storage for this upload if it doesn't exist
+    if (!chunkStorage[storageKey]) {
+      chunkStorage[storageKey] = {
+        chunks: [],
+        totalChunks,
+        metadata: {
+          type,
+          year,
+          month,
+          columns,
+          validRowIndices: chunkIndex === 0 ? validRowIndices : undefined
+        },
+        timestamp: Date.now()
+      };
+    }
+
+    // Store the chunk (first chunk includes headers)
+    const headers = chunkIndex === 0 ? data[0] : null;
+    if (chunkIndex === 0) {
+      chunkStorage[storageKey].metadata.headers = headers;
+    }
+
+    chunkStorage[storageKey].chunks[chunkIndex] = {
+      index: chunkIndex,
+      data: data.slice(1), // Remove headers from chunk (they're the same for all chunks)
+      rows
+    };
+
+    const receivedChunks = chunkStorage[storageKey].chunks.filter(c => c !== undefined).length;
+    console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} stored. Progress: ${receivedChunks}/${totalChunks} chunks received`);
+
+    // Check if all chunks have been received
+    const allChunksReceived = receivedChunks === totalChunks;
+
+    res.json({
+      success: true,
+      message: `Chunk ${chunkIndex + 1}/${totalChunks} received`,
+      chunkIndex,
+      allChunksReceived,
+      receivedChunks,
+      totalChunks
+    });
+  } catch (error) {
+    console.error("❌ Chunk upload error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to upload chunk";
+    res.status(500).json({ error: errorMessage });
+  }
+};
+
+// POST /api/upload/finalize - Finalize chunked upload by combining all chunks and saving to database
+export const handleFinalizeUpload: RequestHandler = async (req, res) => {
+  try {
+    const { type, year, month, isUpdate } = req.body;
+
+    if (!type || !year || !month) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const storageKey = `${type}_${year}_${month}`;
+
+    // Check if we have stored chunks for this upload
+    const uploadData = chunkStorage[storageKey];
+    if (!uploadData) {
+      return res.status(400).json({ error: "No chunked upload in progress for this month" });
+    }
+
+    console.log(`🔄 Finalizing upload for ${storageKey}`);
+
+    // Verify all chunks are present
+    const { chunks, totalChunks, metadata } = uploadData;
+    const receivedChunks = chunks.filter(c => c !== undefined).length;
+
+    if (receivedChunks !== totalChunks) {
+      return res.status(400).json({
+        error: `Missing chunks. Expected ${totalChunks}, received ${receivedChunks}`
+      });
+    }
+
+    // Combine all chunks
+    const combinedDataRows = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (!chunk) {
+        throw new Error(`Chunk ${i} is missing`);
+      }
+      combinedDataRows.push(...chunk.data);
+    }
+
+    // Get headers from metadata (stored from first chunk)
+    const headers = metadata.headers || [];
+    const fullData = [headers, ...combinedDataRows];
+
+    // Get database and determine if this is insert or update
+    const db = await getDatabase();
+    const collection = db.collection(type);
+
+    let totalRows = combinedDataRows.length;
+    let finalData = fullData;
+
+    // Apply valid row indices if provided (filter invalid rows)
+    if (metadata.validRowIndices && Array.isArray(metadata.validRowIndices) && metadata.validRowIndices.length > 0) {
+      // The validRowIndices are based on the original full file row numbers (1-indexed from UI)
+      // Since we have just the data rows here (without original file structure),
+      // we need to filter them based on the indices
+      const validIndices = new Set(metadata.validRowIndices);
+      const filteredRows = combinedDataRows.filter((_, idx) => validIndices.has(idx + 2)); // +2 because row 0 is header, row 1 is first data row
+      finalData = [[], ...filteredRows];
+      totalRows = filteredRows.length;
+    }
+
+    // Handle insert or update
+    if (isUpdate) {
+      console.log(`🔄 Updating existing data for ${storageKey}`);
+      const result = await collection.updateOne(
+        { year, month },
+        {
+          $set: {
+            rows: totalRows,
+            columns: metadata.columns,
+            data: finalData,
+            updatedAt: new Date(),
+            status: "updated"
+          }
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ error: "Data not found for update" });
+      }
+
+      console.log(`✅ Update finalized for ${storageKey}: ${totalRows} rows`);
+    } else {
+      // Check if data already exists
+      const existingData = await collection.findOne({ year, month });
+      if (existingData) {
+        return res.status(409).json({
+          error: "Data already exists for this month",
+          exists: true
+        });
+      }
+
+      console.log(`💾 Inserting new data for ${storageKey}: ${totalRows} rows`);
+      await collection.insertOne({
+        year,
+        month,
+        rows: totalRows,
+        columns: metadata.columns,
+        data: finalData,
+        uploadedAt: new Date(),
+        status: "uploaded"
+      });
+    }
+
+    // Clean up chunk storage
+    delete chunkStorage[storageKey];
+    console.log(`🧹 Cleaned up chunk storage for ${storageKey}`);
+
+    res.json({
+      success: true,
+      message: `Upload finalized successfully (${totalRows} rows)`,
+      rowsUploaded: totalRows
+    });
+  } catch (error) {
+    console.error("❌ Finalize error:", error);
+
+    // Clean up on error
+    const storageKey = `${req.body.type}_${req.body.year}_${req.body.month}`;
+    if (chunkStorage[storageKey]) {
+      delete chunkStorage[storageKey];
+    }
+
+    const errorMessage = error instanceof Error ? error.message : "Failed to finalize upload";
     res.status(500).json({ error: errorMessage });
   }
 };
