@@ -53,52 +53,58 @@ export default function UploadTab({ type }: UploadTabProps) {
   // Fetch month statuses when type or selectedYear changes
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
-    let isCleanup = false;
+    let timeoutId: NodeJS.Timeout | null = null;
 
     const fetchMonthStatus = async () => {
+      const controller = new AbortController();
+
       try {
         console.log(`Fetching month status for ${type} year ${selectedYear}`);
 
         // Add a timeout for the fetch request (30 seconds)
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        timeoutId = setTimeout(() => {
+          controller.abort();
+        }, 30000);
 
-        try {
-          const response = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`, {
-            signal: controller.signal
-          });
+        const response = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`, {
+          signal: controller.signal
+        });
 
+        if (timeoutId) {
           clearTimeout(timeoutId);
+          timeoutId = null;
+        }
 
-          if (!response.ok) {
-            console.warn(`API returned status ${response.status}`);
-            if (isMounted) {
-              setMonthsStatus(Array.from({ length: 12 }, (_, i) => ({
-                month: i + 1,
-                status: "pending" as const
-              })));
-            }
-            return;
+        if (!response.ok) {
+          console.warn(`API returned status ${response.status}`);
+          if (isMounted) {
+            setMonthsStatus(Array.from({ length: 12 }, (_, i) => ({
+              month: i + 1,
+              status: "pending" as const
+            })));
           }
+          return;
+        }
 
-          const data = await response.json();
-          if (isMounted && data.data && Array.isArray(data.data)) {
-            setMonthsStatus(data.data);
-          }
-        } catch (fetchError) {
-          clearTimeout(timeoutId);
-          throw fetchError;
+        const data = await response.json();
+        if (isMounted && data.data && Array.isArray(data.data)) {
+          setMonthsStatus(data.data);
         }
       } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          if (!isCleanup) {
-            console.error("❌ Month status fetch was aborted (timeout or cancelled)");
-          }
-          return; // Ignore aborts
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
         }
-        console.error("Failed to fetch month status:", error);
-        // Set default pending status on fetch error - don't block UI
+
+        if (error instanceof Error && error.name === "AbortError") {
+          // Silently ignore abort errors (timeout or cleanup)
+          return;
+        }
+
+        // Only log if not cleaned up
         if (isMounted) {
+          console.error("Failed to fetch month status:", error);
+          // Set default pending status on fetch error - don't block UI
           setMonthsStatus(Array.from({ length: 12 }, (_, i) => ({
             month: i + 1,
             status: "pending" as const
@@ -110,10 +116,10 @@ export default function UploadTab({ type }: UploadTabProps) {
     fetchMonthStatus();
 
     return () => {
-      isCleanup = true;
       isMounted = false;
-      // Don't abort the controller during cleanup to avoid AbortError if something is still in flight
-      // This matches the pattern in ItemDetail.tsx that fixed similar AbortErrors
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     };
   }, [type, selectedYear]);
 
