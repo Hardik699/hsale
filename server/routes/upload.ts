@@ -13,6 +13,10 @@ let connectionPromise: Promise<Db> | null = null;
 // Temporary storage for chunks during chunked uploads
 const chunkStorage: { [key: string]: { chunks: any[]; totalChunks: number; metadata: any; timestamp: number } } = {};
 
+// Cache SAP code map with TTL (5 minutes)
+let sapCodeMapCache: { map: Set<string>; timestamp: number } | null = null;
+const SAP_CODE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Cleanup old chunk uploads every 30 minutes (older than 2 hours)
 setInterval(() => {
   const now = Date.now();
@@ -23,6 +27,12 @@ setInterval(() => {
       console.log(`🧹 Cleaning up expired chunk storage for ${key}`);
       delete chunkStorage[key];
     }
+  }
+
+  // Also clear SAP code cache if older than TTL
+  if (sapCodeMapCache && now - sapCodeMapCache.timestamp > SAP_CODE_CACHE_TTL) {
+    console.log(`🧹 Clearing SAP code map cache`);
+    sapCodeMapCache = null;
   }
 }, 30 * 60 * 1000);
 
@@ -59,6 +69,48 @@ async function getDatabase(): Promise<Db> {
   })();
 
   return connectionPromise;
+}
+
+// Get cached SAP code map with TTL
+async function getSAPCodeMap(): Promise<Set<string>> {
+  const now = Date.now();
+
+  // Return cached map if still valid
+  if (sapCodeMapCache && now - sapCodeMapCache.timestamp < SAP_CODE_CACHE_TTL) {
+    console.log(`✅ Using cached SAP code map (${sapCodeMapCache.map.size} codes)`);
+    return sapCodeMapCache.map;
+  }
+
+  console.log(`🔄 Fetching fresh SAP code map from database...`);
+  const db = await getDatabase();
+  const itemsCollection = db.collection("items");
+
+  try {
+    const items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
+    const sapCodeSet = new Set<string>();
+
+    for (const item of items) {
+      if (item.variations && Array.isArray(item.variations)) {
+        item.variations.forEach((v: any) => {
+          if (v.sapCode) {
+            sapCodeSet.add(v.sapCode.trim());
+          }
+        });
+      }
+    }
+
+    // Cache the result
+    sapCodeMapCache = {
+      map: sapCodeSet,
+      timestamp: now
+    };
+
+    console.log(`✅ Built SAP code map with ${sapCodeSet.size} codes`);
+    return sapCodeSet;
+  } catch (error) {
+    console.error("❌ Error fetching SAP codes:", error);
+    throw error;
+  }
 }
 
 // Helper function to normalize area to lowercase
@@ -502,38 +554,19 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
       });
     }
 
-    console.log("🔗 Connecting to database for validation...");
-    const db = await getDatabase();
-    const itemsCollection = db.collection("items");
+    console.log("🔗 Fetching SAP code map for validation...");
 
-    // Get all items and build SAP code map
-    console.log("📊 Fetching items to build SAP code map...");
-    let items;
+    let sapCodeSet: Set<string>;
     try {
-      items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
-      console.log(`✅ Found ${items.length} items`);
+      sapCodeSet = await getSAPCodeMap();
     } catch (dbError) {
-      console.error("❌ Database error while fetching items:", dbError);
+      console.error("❌ Database error while fetching SAP codes:", dbError);
       const errorMsg = dbError instanceof Error ? dbError.message : "Database connection failed";
       return res.status(503).json({
         error: `Database query failed: ${errorMsg}. Please try again.`,
         retryable: true
       });
     }
-
-    const sapCodeMap: { [key: string]: boolean } = {};
-
-    for (const item of items) {
-      if (item.variations && Array.isArray(item.variations)) {
-        item.variations.forEach((v: any) => {
-          if (v.sapCode) {
-            sapCodeMap[v.sapCode.trim()] = true;
-          }
-        });
-      }
-    }
-
-    console.log(`🔍 Built SAP code map with ${Object.keys(sapCodeMap).length} codes`);
 
     const headers = data[0] as string[];
     const dataRows = data.slice(1);
@@ -581,7 +614,7 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
       } else if (!sapCode) {
         isValid = false;
         reason = "No SAP code found in row";
-      } else if (!sapCodeMap[sapCode]) {
+      } else if (!sapCodeSet.has(sapCode)) {
         isValid = false;
         reason = `SAP code "${sapCode}" not found in database`;
       }
@@ -781,16 +814,27 @@ export const handleFinalizeUpload: RequestHandler = async (req, res) => {
       });
     }
 
-    // Combine all chunks
-    const combinedDataRows = [];
+    // Combine all chunks efficiently
+    const combinedDataRows: any[] = [];
+    let totalRowsInChunks = 0;
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       if (!chunk) {
         throw new Error(`Chunk ${i} is missing`);
       }
-      combinedDataRows.push(...chunk.data);
+      // Use spread for small chunks, push for large data
+      if (chunk.data.length > 1000) {
+        combinedDataRows.push(...chunk.data);
+      } else {
+        for (const row of chunk.data) {
+          combinedDataRows.push(row);
+        }
+      }
+      totalRowsInChunks += chunk.rows;
     }
+
+    console.log(`✅ Combined ${chunks.length} chunks into ${combinedDataRows.length} data rows`);
 
     // Get headers from metadata (stored from first chunk)
     const headers = metadata.headers || [];
