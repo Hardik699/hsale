@@ -33,12 +33,16 @@ export default defineConfig(({ mode }) => ({
 
 function expressPlugin(): Plugin {
   let app: any;
+  let serverReady = false;
 
   return {
     name: "express-plugin",
     apply: "serve",
     configureServer(server) {
       app = createServer();
+      serverReady = true;
+
+      console.log("✅ Express app created and ready to handle requests");
 
       // Middleware to handle API routes with Express
       server.middlewares.use((req, res, next) => {
@@ -46,12 +50,21 @@ function expressPlugin(): Plugin {
 
         // Only let Express handle /api routes
         if (url.startsWith("/api")) {
+          // Log the request for debugging
+          console.log(`🔗 Express handling: ${req.method} ${url}`);
+
           try {
-            return app(req, res, next);
+            // Call the Express app as middleware
+            // The Express app will handle the request and response
+            return app(req, res);
           } catch (error) {
-            console.error("Express handler error:", error);
-            res.statusCode = 500;
-            res.end("Internal Server Error");
+            console.error("❌ Error in Express middleware for", url, ":", error);
+            // If there's an error and headers haven't been sent, try to send error response
+            if (!res.headersSent) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Internal Server Error", details: String(error) }));
+            }
           }
         }
 
