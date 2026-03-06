@@ -72,16 +72,22 @@ export default function ItemDetail() {
     let isMounted = true;
     let timeoutId: NodeJS.Timeout | null = null;
 
-    const fetchRestaurants = async (retryCount = 0) => {
+    const fetchRestaurants = async (retryCount = 0, delayMs = 0) => {
+      if (delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+
+      if (!isMounted) return;
+
       // Create a new AbortController for each fetch attempt
       const controller = new AbortController();
 
       try {
-        if (!isMounted) return;
         if (retryCount === 0) setRestaurantsLoading(true);
 
         const abortTimeoutId = setTimeout(() => controller.abort(), 30000);
 
+        console.log(`🔄 Fetching restaurants (attempt ${retryCount + 1})...`);
         const response = await fetch("/api/sales/restaurants", {
           signal: controller.signal,
         });
@@ -90,7 +96,7 @@ export default function ItemDetail() {
         if (!isMounted) return;
 
         if (!response.ok) {
-          console.warn("⚠️ Failed to fetch restaurants:", response.status);
+          console.warn("⚠️ Failed to fetch restaurants:", response.status, response.statusText);
           if (isMounted) setRestaurants([]);
           return;
         }
@@ -105,16 +111,17 @@ export default function ItemDetail() {
           }
         }
       } catch (error) {
-        console.warn(`⚠️ Restaurant fetch failed (attempt ${retryCount + 1}):`, error);
+        console.error(`❌ Restaurant fetch failed (attempt ${retryCount + 1}):`, error);
         // Retry once on network errors or timeout
         if (retryCount < 1 && isMounted) {
           if (error instanceof TypeError || (error instanceof Error && error.name === "AbortError")) {
-            console.log("⏳ Retrying restaurant fetch in 2 seconds...");
+            console.log(`⏳ Retrying restaurant fetch in 2 seconds...`);
             timeoutId = setTimeout(() => fetchRestaurants(retryCount + 1), 2000);
             return;
           }
         }
         if (isMounted) {
+          console.warn("⚠️ Setting restaurants to empty array due to fetch failure");
           setRestaurants([]);
         }
       } finally {
@@ -124,7 +131,8 @@ export default function ItemDetail() {
       }
     };
 
-    fetchRestaurants();
+    // Delay initial fetch slightly to ensure server is ready
+    fetchRestaurants(0, 100);
 
     // Cleanup function
     return () => {
@@ -136,7 +144,13 @@ export default function ItemDetail() {
   useEffect(() => {
     let isMounted = true;
 
-    const fetchItem = async (retryCount = 0) => {
+    const fetchItem = async (retryCount = 0, delayMs = 0) => {
+      if (delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+
+      if (!isMounted) return;
+
       // Create a new AbortController for each fetch attempt
       const controller = new AbortController();
 
@@ -189,19 +203,20 @@ export default function ItemDetail() {
           if (isMounted) setItem(foundItem);
         }
       } catch (error: any) {
-        console.error(`❌ Error fetching item (attempt ${retryCount + 1}):`, error.message);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Error fetching item (attempt ${retryCount + 1}):`, errorMessage);
 
         // Retry once if it's a network error or timeout
         if (retryCount < 1 && isMounted) {
           if (error instanceof TypeError || error.name === "AbortError") {
-            console.log("⏳ Retrying item fetch in 3 seconds...");
+            console.log(`⏳ Retrying item fetch in 3 seconds (error: ${error.name || 'TypeError'})...`);
             setTimeout(() => fetchItem(retryCount + 1), 3000);
             return;
           }
         }
 
         if (isMounted) {
-          setError(error instanceof Error ? error.message : "Failed to fetch item");
+          setError(errorMessage || "Failed to fetch item");
           setItem(null);
         }
       } finally {
@@ -209,7 +224,8 @@ export default function ItemDetail() {
       }
     };
 
-    fetchItem();
+    // Delay initial fetch slightly to ensure server is ready
+    fetchItem(0, 100);
 
     return () => {
       isMounted = false;
@@ -266,7 +282,13 @@ export default function ItemDetail() {
     let timeoutId: NodeJS.Timeout | null = null;
     let isCleanup = false;
 
-    const fetchSalesData = async (retryCount = 0) => {
+    const fetchSalesData = async (retryCount = 0, delayMs = 0) => {
+      if (delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+
+      if (!isMounted) return;
+
       if (!itemId || !dateRange.start || !dateRange.end) {
         if (isMounted) setSalesData(null);
         return;
@@ -322,6 +344,9 @@ export default function ItemDetail() {
           setSalesData(null);
         }
       } catch (error: any) {
+        const errorName = error?.name || (error instanceof TypeError ? "TypeError" : "Unknown");
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
         if (error.name === "AbortError") {
           console.warn("⚠️ Sales data fetch timed out (server took too long to respond)");
           // Retry once if it's an abort error
@@ -337,11 +362,11 @@ export default function ItemDetail() {
           return;
         }
 
-        console.error(`❌ Error fetching sales data (attempt ${retryCount + 1}):`, error.message);
+        console.error(`❌ Error fetching sales data (attempt ${retryCount + 1}):`, errorMessage);
 
         // Retry once if it's a TypeError (Failed to fetch - network error)
         if (retryCount < 1 && error instanceof TypeError && isMounted && !isCleanup) {
-          console.log("⏳ Retrying sales data fetch in 3 seconds due to network error...");
+          console.log(`⏳ Retrying sales data fetch in 3 seconds due to network error (${errorName})...`);
           setTimeout(() => fetchSalesData(retryCount + 1), 3000);
           return;
         }
@@ -356,7 +381,8 @@ export default function ItemDetail() {
       }
     };
 
-    fetchSalesData();
+    // Delay initial fetch slightly to ensure server is ready
+    fetchSalesData(0, 150);
 
     // Cleanup function
     return () => {

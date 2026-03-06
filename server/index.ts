@@ -79,9 +79,20 @@ export function createServer() {
   });
 
   // Middleware
-  app.use(cors());
+  app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+    credentials: false,
+  }));
   app.use(express.json({ limit: "200mb" }));
   app.use(express.urlencoded({ extended: true, limit: "200mb" }));
+
+  // Ensure responses have proper Content-Type
+  app.use((req, res, next) => {
+    res.setHeader("Content-Type", "application/json");
+    next();
+  });
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {
@@ -161,6 +172,12 @@ export function createServer() {
   app.delete("/api/sales/clear-all", handleClearAllPetpoojaData);
   app.post("/api/sales", handleRecordSale);
 
+  // 404 handler
+  app.use((req, res) => {
+    console.warn(`⚠️ 404 Not Found: ${req.method} ${req.path}`);
+    res.status(404).json({ error: "Not found", path: req.path });
+  });
+
   // Error handling middleware
   app.use(
     (
@@ -172,7 +189,7 @@ export function createServer() {
       console.error("Server error:", err);
       res
         .status(500)
-        .json({ error: "Internal server error", message: err?.message });
+        .json({ error: "Internal server error", message: err?.message || String(err) });
     },
   );
 
