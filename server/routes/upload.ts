@@ -77,7 +77,7 @@ async function getSAPCodeMap(): Promise<Set<string>> {
 
   // Return cached map if still valid
   if (sapCodeMapCache && now - sapCodeMapCache.timestamp < SAP_CODE_CACHE_TTL) {
-    console.log(`✅ Using cached SAP code map (${sapCodeMapCache.map.size} codes)`);
+    console.log(`✅ Using cached SAP code map (${sapCodeMapCache.map.size} codes, age: ${Math.round((now - sapCodeMapCache.timestamp) / 1000)}s)`);
     return sapCodeMapCache.map;
   }
 
@@ -86,14 +86,20 @@ async function getSAPCodeMap(): Promise<Set<string>> {
   const itemsCollection = db.collection("items");
 
   try {
+    const fetchStartTime = Date.now();
     const items = await itemsCollection.find({}, { projection: { "variations.sapCode": 1 } }).toArray();
+    const fetchTimeMs = Date.now() - fetchStartTime;
+    console.log(`  ✓ Fetched ${items.length} items in ${fetchTimeMs}ms`);
+
     const sapCodeSet = new Set<string>();
+    let totalVariations = 0;
 
     for (const item of items) {
       if (item.variations && Array.isArray(item.variations)) {
         item.variations.forEach((v: any) => {
           if (v.sapCode) {
             sapCodeSet.add(v.sapCode.trim());
+            totalVariations++;
           }
         });
       }
@@ -105,11 +111,12 @@ async function getSAPCodeMap(): Promise<Set<string>> {
       timestamp: now
     };
 
-    console.log(`✅ Built SAP code map with ${sapCodeSet.size} codes`);
+    console.log(`✅ Built SAP code map with ${sapCodeSet.size} unique codes from ${totalVariations} total variations`);
     return sapCodeSet;
   } catch (error) {
     console.error("❌ Error fetching SAP codes:", error);
-    throw error;
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to fetch SAP codes from database: ${errorMsg}`);
   }
 }
 
@@ -540,15 +547,25 @@ export const handleGetData: RequestHandler = async (req, res) => {
 export const handleValidateUpload: RequestHandler = async (req, res) => {
   try {
     const { type, data, isMinimal, originalIndices } = req.body;
+    const rowCount = Array.isArray(data) ? data.length : 0;
 
     console.log("📋 Validation request received:", {
       type,
-      rowCount: Array.isArray(data) ? data.length : 0,
+      rowCount,
       isMinimal: !!isMinimal
     });
 
     if (!type || !Array.isArray(data) || data.length === 0) {
       return res.status(400).json({ error: "Invalid request data" });
+    }
+
+    // Limit validation to prevent memory issues and timeouts
+    const MAX_VALIDATION_ROWS = 500000; // 500k rows max for validation
+    if (rowCount > MAX_VALIDATION_ROWS) {
+      return res.status(413).json({
+        error: `File too large for validation (${rowCount} rows). Maximum ${MAX_VALIDATION_ROWS} rows allowed.`,
+        retryable: false
+      });
     }
 
     if (type !== "petpooja") {
@@ -604,7 +621,10 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
     let invalidCount = 0;
 
     const startTime = Date.now();
+    const MAX_VALID_ROWS_IN_RESPONSE = 100;
+    const MAX_INVALID_ROWS_IN_RESPONSE = 500;
 
+    // Process rows with periodic progress logging for very large datasets
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
       if (!Array.isArray(row) || row.length === 0) continue;
@@ -628,20 +648,26 @@ export const handleValidateUpload: RequestHandler = async (req, res) => {
 
       if (isValid) {
         validCount++;
-        // Only include first 100 valid rows in response to keep payload small
-        if (validRows.length < 100) {
+        // Only include first N valid rows in response to keep payload small
+        if (validRows.length < MAX_VALID_ROWS_IN_RESPONSE) {
           validRows.push({ rowIndex: i + 2, data: isMinimal ? [restaurant, sapCode] : row });
         }
       } else {
         invalidCount++;
-        // Only include first 500 invalid rows in response to keep payload small
-        if (invalidRows.length < 500) {
+        // Only include first N invalid rows in response to keep payload small
+        if (invalidRows.length < MAX_INVALID_ROWS_IN_RESPONSE) {
           invalidRows.push({
             rowIndex: i + 2,
             data: isMinimal ? [restaurant, sapCode] : row,
             reason
           });
         }
+      }
+
+      // Log progress for very large datasets every 10,000 rows
+      if ((i + 1) % 10000 === 0) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`  ⏳ Validation progress: ${i + 1}/${dataRows.length} rows checked (${elapsed}s)`);
       }
     }
 

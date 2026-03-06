@@ -244,8 +244,9 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`Starting validation for ${dataRowCount_sampled}/${dataRowCount} rows${sampledText}${attemptText}`);
 
       const controller = new AbortController();
-      // Increase timeout based on data size: 10 seconds per 1000 rows, minimum 30 seconds, maximum 60 minutes
-      const estimatedTimeMs = Math.max(30000, Math.min(3600000, (dataRowCount / 1000) * 10000 + 30000));
+      // Increase timeout based on data size: 15 seconds per 1000 rows, minimum 60 seconds, maximum 2 hours
+      // Increased from 10s per 1000 rows to handle slower validations
+      const estimatedTimeMs = Math.max(60000, Math.min(7200000, (dataRowCount / 1000) * 15000 + 60000));
       console.log(`⏱️ Setting validation timeout to ${(estimatedTimeMs / 1000).toFixed(0)} seconds for ${dataRowCount} rows`);
       const timeoutId = setTimeout(() => {
         console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
@@ -302,11 +303,16 @@ export default function UploadTab({ type }: UploadTabProps) {
 
       let result;
       try {
-        result = await response.json();
+        const responseText = await response.text();
+        if (!responseText) {
+          throw new Error("Empty response from validation server");
+        }
+        result = JSON.parse(responseText);
         console.log(`Validation response parsed: validCount=${result.validCount}, invalidCount=${result.invalidCount}`);
       } catch (parseError) {
         console.error("Failed to parse validation response:", parseError);
-        throw new Error("Failed to parse validation response: " + String(parseError));
+        const parseErrorMsg = parseError instanceof Error ? parseError.message : String(parseError);
+        throw new Error("Server validation response error: " + parseErrorMsg);
       }
 
       if (result.invalidCount > 0) {
