@@ -199,7 +199,7 @@ export default function UploadTab({ type }: UploadTabProps) {
     return json;
   };
 
-  const validateData = async (fullData: any[], retryCount = 0) => {
+  const validateData = async (fullData: any[]) => {
     try {
       setIsValidating(true);
       setMessage(null);
@@ -210,6 +210,7 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const headers = fullData[0] as string[];
+      const dataRowCount = fullData.length - 1;
 
       // Find indices of columns we need for validation
       const getColumnIndex = (name: string) =>
@@ -224,111 +225,101 @@ export default function UploadTab({ type }: UploadTabProps) {
         return;
       }
 
-      // Create a minimal version of the data for validation to save bandwidth/memory
-      // For very large files (>100k rows), sample every Nth row to speed up validation
-      const dataRowCount = fullData.length - 1;
-      const sampleRate = dataRowCount > 100000 ? Math.ceil(dataRowCount / 100000) : 1;
+      console.log(`🔍 Starting chunked validation for ${dataRowCount} rows (1000 rows per chunk)`);
+      setMessage({ type: "warning", text: `Validating ${dataRowCount.toLocaleString()} rows in chunks... This may take a moment.` });
 
-      const minimalData = fullData.map((row, idx) => {
-        if (idx === 0) return headers; // Keep headers
-        // Sample large datasets to reduce validation time
-        if (sampleRate > 1 && idx % sampleRate !== 0) {
-          return null; // Will be filtered out
-        }
-        return [row[restaurantIdx], row[sapCodeIdx]];
-      }).filter(row => row !== null);
+      // Chunked validation - validate 1000 rows at a time
+      const CHUNK_SIZE = 1000;
+      const totalChunks = Math.ceil(dataRowCount / CHUNK_SIZE);
+      const allValidRows = [];
+      const allInvalidRows = [];
+      let totalValidCount = 0;
+      let totalInvalidCount = 0;
 
-      const dataRowCount_sampled = minimalData.length - 1;
-      const attemptText = retryCount > 0 ? ` (attempt ${retryCount + 1})` : "";
-      const sampledText = sampleRate > 1 ? ` [sampled ${sampleRate}:1]` : "";
-      console.log(`Starting validation for ${dataRowCount_sampled}/${dataRowCount} rows${sampledText}${attemptText}`);
+      for (let chunkNum = 0; chunkNum < totalChunks; chunkNum++) {
+        const startIdx = chunkNum * CHUNK_SIZE + 1; // +1 to skip headers
+        const endIdx = Math.min(startIdx + CHUNK_SIZE, dataRowCount + 1);
+        const chunkData = [headers, ...fullData.slice(startIdx, endIdx)];
 
-      const controller = new AbortController();
-      // Increase timeout based on data size: 10 seconds per 1000 rows, minimum 30 seconds, maximum 60 minutes
-      const estimatedTimeMs = Math.max(30000, Math.min(3600000, (dataRowCount / 1000) * 10000 + 30000));
-      console.log(`⏱️ Setting validation timeout to ${(estimatedTimeMs / 1000).toFixed(0)} seconds for ${dataRowCount} rows`);
-      const timeoutId = setTimeout(() => {
-        console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
-        controller.abort();
-      }, estimatedTimeMs);
-
-      // Show that validation is in progress
-      const statusText = retryCount > 0
-        ? `Retrying validation of ${dataRowCount.toLocaleString()} rows (attempt ${retryCount + 1})...`
-        : `Validating ${dataRowCount.toLocaleString()} rows... This may take a moment for large files.`;
-      setMessage({ type: "warning", text: statusText });
-
-      const response = await fetch("/api/upload/validate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Request-Size": String(dataRowCount)
-        },
-        body: JSON.stringify({
-          type,
-          data: minimalData,
-          isMinimal: true,
-          originalIndices: { restaurantIdx, sapCodeIdx }
-        }),
-        signal: controller.signal
-      });
-
-      if (timeoutId) clearTimeout(timeoutId);
-
-      console.log(`Response received: status=${response.status}, ok=${response.ok}, headers=${JSON.stringify(Object.fromEntries(response.headers))}`);
-
-      if (!response.ok) {
-        let errorText = "Validation failed";
-        let isRetryable = false;
-        try {
-          const errorData = await response.json();
-          errorText = errorData.error || errorText;
-          isRetryable = errorData.retryable === true;
-        } catch (e) {
-          console.error("Failed to parse error response:", e);
-        }
-
-        // Retry if the error is retryable and we haven't exceeded retry limit
-        if (isRetryable && retryCount < 2) {
-          console.log(`Server returned retryable error (attempt ${retryCount + 2}/3). Retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          return validateData(fullData, retryCount + 1);
-        }
-
-        setMessage({ type: "error", text: errorText });
-        setIsValidating(false);
-        return;
-      }
-
-      let result;
-      try {
-        result = await response.json();
-        console.log(`Validation response parsed: validCount=${result.validCount}, invalidCount=${result.invalidCount}`);
-      } catch (parseError) {
-        console.error("Failed to parse validation response:", parseError);
-        throw new Error("Failed to parse validation response: " + String(parseError));
-      }
-
-      if (result.invalidCount > 0) {
-        // Map minimal row data back to original row data for display
-        const mappedInvalidRows = result.invalidRows.map((invalidRow: any) => {
-          const originalRow = fullData[invalidRow.rowIndex - 1]; // rowIndex is 1-based
-          return {
-            ...invalidRow,
-            data: originalRow
-          };
+        // Create minimal data for this chunk
+        const minimalChunkData = chunkData.map((row, idx) => {
+          if (idx === 0) return headers;
+          return [row[restaurantIdx], row[sapCodeIdx]];
         });
 
-        setValidationResult({
-          ...result,
-          invalidRows: mappedInvalidRows
-        });
-
-        // Select all valid rows by default
-        setSelectedValidRowIndices(result.validRows.map((r: any) => r.rowIndex));
+        console.log(`📦 Validating chunk ${chunkNum + 1}/${totalChunks} (rows ${startIdx}-${endIdx - 1})`);
         setMessage({
           type: "warning",
-          text: `Found ${result.invalidCount} invalid row(s) that will be removed on upload. Review and confirm below.`
+          text: `Validating... Chunk ${chunkNum + 1}/${totalChunks} (${Math.round(((chunkNum + 1) / totalChunks) * 100)}% complete)`
+        });
+
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds per chunk
+
+          const response = await fetch("/api/upload/validate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type,
+              data: minimalChunkData,
+              isMinimal: true,
+              originalIndices: { restaurantIdx, sapCodeIdx }
+            }),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            let errorText = `Chunk ${chunkNum + 1} validation failed`;
+            try {
+              const errorData = await response.json();
+              errorText = errorData.error || errorText;
+            } catch (e) {}
+            throw new Error(errorText);
+          }
+
+          const result = await response.json();
+          console.log(`✅ Chunk ${chunkNum + 1} validated: ${result.validCount} valid, ${result.invalidCount} invalid`);
+
+          totalValidCount += result.validCount;
+          totalInvalidCount += result.invalidCount;
+
+          // Collect invalid rows (map back to original row indices)
+          if (result.invalidRows && result.invalidRows.length > 0) {
+            result.invalidRows.forEach((row: any) => {
+              allInvalidRows.push({
+                ...row,
+                data: fullData[row.rowIndex - 1]
+              });
+            });
+          }
+
+          // Collect valid rows
+          if (result.validRows && result.validRows.length > 0) {
+            allValidRows.push(...result.validRows);
+          }
+        } catch (chunkError) {
+          console.error(`❌ Chunk ${chunkNum + 1} validation error:`, chunkError);
+          throw chunkError;
+        }
+      }
+
+      console.log(`✅ Validation complete: ${totalValidCount} valid, ${totalInvalidCount} invalid rows`);
+
+      if (totalInvalidCount > 0) {
+        setValidationResult({
+          validCount: totalValidCount,
+          invalidCount: totalInvalidCount,
+          validRows: allValidRows,
+          invalidRows: allInvalidRows
+        });
+
+        setSelectedValidRowIndices(allValidRows.map((r: any) => r.rowIndex));
+        setMessage({
+          type: "warning",
+          text: `Found ${totalInvalidCount} invalid row(s) that will be removed on upload. Review and confirm below.`
         });
       } else {
         setValidationResult(null);
@@ -338,64 +329,32 @@ export default function UploadTab({ type }: UploadTabProps) {
       setIsValidating(false);
     } catch (error) {
       console.error("Validation error:", error);
-      console.error("Error stack:", error instanceof Error ? error.stack : "No stack trace");
-
-      const isFetchError = error instanceof TypeError && error.message.includes("Failed to fetch");
-      const isAbortError = error instanceof Error && error.name === "AbortError";
-      const isNetworkError = isFetchError || isAbortError;
 
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("Error classification:", { isFetchError, isAbortError, isNetworkError, errorMessage });
-
-      // Retry logic for network errors
-      if (isNetworkError) {
-        if (retryCount < 2) {
-          const waitTime = 2000 + (retryCount * 1000); // Exponential backoff: 2s, 3s, 4s
-          console.log(`Retrying validation (attempt ${retryCount + 2}/3) after ${waitTime}ms...`);
-          setMessage({
-            type: "warning",
-            text: `${isAbortError ? "Request timeout" : "Connection error"}. Retrying (attempt ${retryCount + 2}/3)...`
-          });
-          // Wait before retrying with exponential backoff
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          return validateData(fullData, retryCount + 1);
-        }
-
-        // All retries failed
-        setMessage({
-          type: "error",
-          text: `Validation failed after 3 attempts (${isAbortError ? "timeout" : "connection error"}). Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking "Upload anyway"`
-        });
-      } else {
-        setMessage({
-          type: "error",
-          text: `Validation failed: ${errorMessage}. You can still try uploading without validation.`
-        });
-      }
+      setMessage({
+        type: "error",
+        text: `Validation failed: ${errorMessage}`
+      });
       setIsValidating(false);
     }
   };
 
-  // Highly optimized chunked upload with parallel transfers and larger chunks
+  // Sequential chunked upload - 1 chunk at a time for server stability
   const uploadInChunks = async (
     uploadBody: any,
     isUpdate: boolean = false
   ): Promise<boolean> => {
     const totalRows = uploadBody.rows;
-    const CHUNK_SIZE = 25000; // Increased from 5000 to 25000 rows per chunk = 5x faster
-    const MAX_PARALLEL = 4; // Upload 4 chunks in parallel for 4x speedup
+    const CHUNK_SIZE = 1000; // 1000 rows per chunk
     const data = uploadBody.data as any[];
     const headers = data[0];
     const dataRows = data.slice(1);
 
-    console.log(`📦 Starting optimized chunked upload: ${totalRows} total rows, chunk size: ${CHUNK_SIZE}, parallel: ${MAX_PARALLEL}`);
-
-    // Calculate number of chunks
     const numChunks = Math.ceil(dataRows.length / CHUNK_SIZE);
+    console.log(`📦 Starting sequential chunked upload: ${totalRows} rows, ${numChunks} chunks of ${CHUNK_SIZE} rows each`);
 
     try {
-      // Prepare all chunk bodies upfront
-      const chunks = [];
+      // Upload chunks ONE AT A TIME (sequential, not parallel)
       for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
         const startIdx = chunkIndex * CHUNK_SIZE;
         const endIdx = Math.min(startIdx + CHUNK_SIZE, dataRows.length);
@@ -416,31 +375,32 @@ export default function UploadTab({ type }: UploadTabProps) {
           delete chunkBody.validRowIndices;
         }
 
-        chunks.push({ index: chunkIndex, body: chunkBody });
-      }
+        console.log(`📤 Uploading chunk ${chunkIndex + 1}/${numChunks} (rows ${startIdx + 1}-${endIdx})`);
+        setMessage({
+          type: "warning",
+          text: `Uploading chunk ${chunkIndex + 1}/${numChunks}... (${Math.round(((chunkIndex + 1) / numChunks) * 100)}% complete)`
+        });
 
-      // Upload chunks in parallel batches
-      let uploadedChunks = 0;
-      for (let batchStart = 0; batchStart < chunks.length; batchStart += MAX_PARALLEL) {
-        const batchEnd = Math.min(batchStart + MAX_PARALLEL, chunks.length);
-        const batch = chunks.slice(batchStart, batchEnd);
+        // Upload single chunk with retry logic
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+        let chunkSuccess = false;
 
-        console.log(`📤 Uploading parallel batch: chunks ${batchStart + 1}-${batchEnd} of ${numChunks}`);
-
-        // Upload batch in parallel
-        const batchPromises = batch.map(async (chunk) => {
-          const controller = new AbortController();
-          const timeoutMs = 180000; // 3 minutes per chunk
-          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
+        while (retryCount < MAX_RETRIES && !chunkSuccess) {
           try {
-            const method = isUpdate && chunk.index === 0 ? "PUT" : "POST";
-            const endpoint = isUpdate && chunk.index === 0 ? "/api/upload" : "/api/upload/chunk";
+            const controller = new AbortController();
+            const timeoutMs = 120000; // 2 minutes per chunk (sequential = slower but stable)
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            const method = isUpdate && chunkIndex === 0 ? "PUT" : "POST";
+            const endpoint = isUpdate && chunkIndex === 0 ? "/api/upload" : "/api/upload/chunk";
+
+            console.log(`  Attempt ${retryCount + 1}/${MAX_RETRIES}: Uploading ${chunkRows} rows to ${endpoint}`);
 
             const response = await fetch(endpoint, {
               method,
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(chunk.body),
+              body: JSON.stringify(chunkBody),
               signal: controller.signal
             });
 
@@ -452,27 +412,31 @@ export default function UploadTab({ type }: UploadTabProps) {
                 const errorData = await response.json();
                 errorText = errorData.error || errorText;
               } catch (e) {}
-              throw new Error(`${errorText} (chunk ${chunk.index + 1}/${numChunks})`);
+              throw new Error(`Server error: ${errorText}`);
             }
 
-            return chunk.index;
-          } catch (chunkError) {
-            console.error(`❌ Chunk ${chunk.index + 1} failed:`, chunkError);
-            throw chunkError;
+            const result = await response.json();
+            console.log(`✅ Chunk ${chunkIndex + 1} uploaded successfully:`, result.message);
+            chunkSuccess = true;
+
+            // Update progress
+            const progress = Math.round(((chunkIndex + 1) / numChunks) * 100);
+            setUploadProgress(progress);
+
+          } catch (error) {
+            retryCount++;
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`❌ Chunk ${chunkIndex + 1} attempt ${retryCount} failed:`, errorMsg);
+
+            if (retryCount < MAX_RETRIES) {
+              const waitMs = 2000 * retryCount; // 2s, 4s, 6s wait between retries
+              console.log(`  Retrying in ${waitMs}ms...`);
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Chunk ${chunkIndex + 1} failed after ${MAX_RETRIES} attempts: ${errorMsg}`);
+            }
           }
-        });
-
-        // Wait for batch to complete
-        await Promise.all(batchPromises);
-        uploadedChunks += batch.length;
-
-        // Update progress
-        const progress = Math.round((uploadedChunks / numChunks) * 100);
-        setUploadProgress(progress);
-        setMessage({
-          type: "warning",
-          text: `Uploading... ${progress}% complete (${uploadedChunks}/${numChunks} chunks)`
-        });
+        }
       }
 
       return true;
@@ -511,26 +475,71 @@ export default function UploadTab({ type }: UploadTabProps) {
         uploadBody.validRowIndices = selectedValidRowIndices;
       }
 
-      // Use chunked upload for large files (>10000 rows), single request for small files
-      // This ensures better parallelization and faster uploads
+      // Use chunked upload for files >5000 rows, single request for small files
+      // Chunked approach is more reliable for all larger files
       let result;
-      if (fileData.rows > 10000) {
-        await uploadInChunks(uploadBody, false);
-        // After all chunks uploaded successfully, finalize
-        const finalizeResponse = await fetch("/api/upload/finalize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type,
-            year: selectedYear,
-            month: selectedMonth
-          })
-        });
+      if (fileData.rows > 5000) {
+        console.log("🔼 All chunks uploaded successfully, finalizing...");
 
-        if (!finalizeResponse.ok) {
-          throw new Error("Failed to finalize upload");
+        // Wait a moment before finalizing to let server process chunks
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Finalize with retry logic
+        let finalizeSuccess = false;
+        let finalizeRetries = 0;
+        const MAX_FINALIZE_RETRIES = 3;
+
+        while (!finalizeSuccess && finalizeRetries < MAX_FINALIZE_RETRIES) {
+          try {
+            console.log(`🔄 Finalize attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES}`);
+            setMessage({
+              type: "warning",
+              text: `Finalizing upload (attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES})...`
+            });
+
+            const finalizeController = new AbortController();
+            const finalizeTimeoutId = setTimeout(() => finalizeController.abort(), 60000); // 60 seconds
+
+            const finalizeResponse = await fetch("/api/upload/finalize", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type,
+                year: selectedYear,
+                month: selectedMonth
+              }),
+              signal: finalizeController.signal
+            });
+
+            clearTimeout(finalizeTimeoutId);
+
+            if (!finalizeResponse.ok) {
+              let errorText = "Failed to finalize upload";
+              try {
+                const errorData = await finalizeResponse.json();
+                errorText = errorData.error || errorText;
+              } catch (e) {}
+              throw new Error(errorText);
+            }
+
+            result = await finalizeResponse.json();
+            finalizeSuccess = true;
+            console.log("✅ Upload finalized successfully:", result);
+
+          } catch (finalizeError) {
+            finalizeRetries++;
+            const errorMsg = finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
+            console.error(`❌ Finalize attempt ${finalizeRetries} failed:`, errorMsg);
+
+            if (finalizeRetries < MAX_FINALIZE_RETRIES) {
+              const waitMs = 3000 * finalizeRetries; // 3s, 6s, 9s wait
+              console.log(`  Retrying in ${waitMs}ms...`);
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Upload finalization failed after ${MAX_FINALIZE_RETRIES} attempts: ${errorMsg}`);
+            }
+          }
         }
-        result = await finalizeResponse.json();
       } else {
         // Small file - use single request
         const controller = new AbortController();
@@ -638,26 +647,71 @@ export default function UploadTab({ type }: UploadTabProps) {
         updateBody.validRowIndices = selectedValidRowIndices;
       }
 
-      // Use chunked upload for large files (>10000 rows), single request for small files
+      // Use chunked upload for files >5000 rows, single request for small files
       let result;
-      if (fileData.rows > 10000) {
-        await uploadInChunks(updateBody, true);
-        // After all chunks uploaded successfully, finalize
-        const finalizeResponse = await fetch("/api/upload/finalize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type,
-            year: selectedYear,
-            month: selectedMonth,
-            isUpdate: true
-          })
-        });
+      if (fileData.rows > 5000) {
+        console.log("🔼 All update chunks uploaded successfully, finalizing...");
 
-        if (!finalizeResponse.ok) {
-          throw new Error("Failed to finalize update");
+        // Wait a moment before finalizing to let server process chunks
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Finalize with retry logic
+        let finalizeSuccess = false;
+        let finalizeRetries = 0;
+        const MAX_FINALIZE_RETRIES = 3;
+
+        while (!finalizeSuccess && finalizeRetries < MAX_FINALIZE_RETRIES) {
+          try {
+            console.log(`🔄 Update finalize attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES}`);
+            setMessage({
+              type: "warning",
+              text: `Finalizing update (attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES})...`
+            });
+
+            const finalizeController = new AbortController();
+            const finalizeTimeoutId = setTimeout(() => finalizeController.abort(), 60000); // 60 seconds
+
+            const finalizeResponse = await fetch("/api/upload/finalize", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type,
+                year: selectedYear,
+                month: selectedMonth,
+                isUpdate: true
+              }),
+              signal: finalizeController.signal
+            });
+
+            clearTimeout(finalizeTimeoutId);
+
+            if (!finalizeResponse.ok) {
+              let errorText = "Failed to finalize update";
+              try {
+                const errorData = await finalizeResponse.json();
+                errorText = errorData.error || errorText;
+              } catch (e) {}
+              throw new Error(errorText);
+            }
+
+            result = await finalizeResponse.json();
+            finalizeSuccess = true;
+            console.log("✅ Update finalized successfully:", result);
+
+          } catch (finalizeError) {
+            finalizeRetries++;
+            const errorMsg = finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
+            console.error(`❌ Update finalize attempt ${finalizeRetries} failed:`, errorMsg);
+
+            if (finalizeRetries < MAX_FINALIZE_RETRIES) {
+              const waitMs = 3000 * finalizeRetries; // 3s, 6s, 9s wait
+              console.log(`  Retrying in ${waitMs}ms...`);
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Update finalization failed after ${MAX_FINALIZE_RETRIES} attempts: ${errorMsg}`);
+            }
+          }
         }
-        result = await finalizeResponse.json();
       } else {
         // Small file - use single request
         const controller = new AbortController();
