@@ -7,6 +7,7 @@ import UploadLoader from "./UploadLoader";
 import ConfirmUploadDialog from "./ConfirmUploadDialog";
 import DeleteDataDialog from "./DeleteDataDialog";
 import { useBackgroundUpload } from "@/hooks/useBackgroundUpload";
+import { useUploadContext } from "@/hooks/UploadContext";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -46,8 +47,9 @@ export default function UploadTab({ type }: UploadTabProps) {
   const [deleteYear, setDeleteYear] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Background upload hook
-  const { currentJob, addUploadJob } = useBackgroundUpload();
+  // Background upload hook and context
+  const { addUploadJob } = useBackgroundUpload();
+  const { currentJob } = useUploadContext();
 
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);

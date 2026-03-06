@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { useUploadContext } from './UploadContext';
 
 export interface UploadJob {
   id: string;
@@ -20,7 +21,7 @@ const VALIDATION_CHUNK_SIZE = 1000;
 
 export function useBackgroundUpload() {
   const [uploadQueue, setUploadQueue] = useState<UploadJob[]>([]);
-  const [currentJob, setCurrentJob] = useState<UploadJob | null>(null);
+  const { currentJob, setCurrentJob: setContextCurrentJob } = useUploadContext();
   const processingRef = useRef(false);
 
   const uploadChunks = useCallback(
@@ -220,16 +221,16 @@ export function useBackgroundUpload() {
 
     try {
       const job = uploadQueue[0];
-      setCurrentJob({ ...job, status: 'uploading' });
+      setContextCurrentJob({ ...job, status: 'uploading' });
 
       await uploadChunks(job, (progress) => {
-        setCurrentJob((prev) =>
+        setContextCurrentJob((prev: UploadJob | null) =>
           prev ? { ...prev, progress } : null
         );
       });
 
       const completedJob = { ...job, status: 'completed' as const, progress: 100 };
-      setCurrentJob(completedJob);
+      setContextCurrentJob(completedJob);
 
       // Show success toast
       toast.success(`✅ Upload Complete!`, {
@@ -239,7 +240,7 @@ export function useBackgroundUpload() {
 
       // Remove from queue and continue
       setUploadQueue((prev) => prev.slice(1));
-      setCurrentJob(null);
+      setContextCurrentJob(null);
 
       // Process next job
       setTimeout(() => {
@@ -252,7 +253,7 @@ export function useBackgroundUpload() {
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : String(error);
-      setCurrentJob((prev) =>
+      setContextCurrentJob((prev: UploadJob | null) =>
         prev ? { ...prev, status: 'failed', error: errorMsg } : null
       );
 
@@ -268,7 +269,7 @@ export function useBackgroundUpload() {
 
       processingRef.current = false;
     }
-  }, [uploadQueue, uploadChunks]);
+  }, [uploadQueue, uploadChunks, setContextCurrentJob]);
 
   const addUploadJob = useCallback(
     (
