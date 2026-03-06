@@ -199,7 +199,7 @@ export default function UploadTab({ type }: UploadTabProps) {
     return json;
   };
 
-  const validateData = async (fullData: any[], retryCount = 0) => {
+  const validateData = async (fullData: any[]) => {
     try {
       setIsValidating(true);
       setMessage(null);
@@ -210,6 +210,7 @@ export default function UploadTab({ type }: UploadTabProps) {
       }
 
       const headers = fullData[0] as string[];
+      const dataRowCount = fullData.length - 1;
 
       // Find indices of columns we need for validation
       const getColumnIndex = (name: string) =>
@@ -224,117 +225,101 @@ export default function UploadTab({ type }: UploadTabProps) {
         return;
       }
 
-      // Create a minimal version of the data for validation to save bandwidth/memory
-      // For very large files (>100k rows), sample every Nth row to speed up validation
-      const dataRowCount = fullData.length - 1;
-      const sampleRate = dataRowCount > 100000 ? Math.ceil(dataRowCount / 100000) : 1;
+      console.log(`🔍 Starting chunked validation for ${dataRowCount} rows (1000 rows per chunk)`);
+      setMessage({ type: "warning", text: `Validating ${dataRowCount.toLocaleString()} rows in chunks... This may take a moment.` });
 
-      const minimalData = fullData.map((row, idx) => {
-        if (idx === 0) return headers; // Keep headers
-        // Sample large datasets to reduce validation time
-        if (sampleRate > 1 && idx % sampleRate !== 0) {
-          return null; // Will be filtered out
-        }
-        return [row[restaurantIdx], row[sapCodeIdx]];
-      }).filter(row => row !== null);
+      // Chunked validation - validate 1000 rows at a time
+      const CHUNK_SIZE = 1000;
+      const totalChunks = Math.ceil(dataRowCount / CHUNK_SIZE);
+      const allValidRows = [];
+      const allInvalidRows = [];
+      let totalValidCount = 0;
+      let totalInvalidCount = 0;
 
-      const dataRowCount_sampled = minimalData.length - 1;
-      const attemptText = retryCount > 0 ? ` (attempt ${retryCount + 1})` : "";
-      const sampledText = sampleRate > 1 ? ` [sampled ${sampleRate}:1]` : "";
-      console.log(`Starting validation for ${dataRowCount_sampled}/${dataRowCount} rows${sampledText}${attemptText}`);
+      for (let chunkNum = 0; chunkNum < totalChunks; chunkNum++) {
+        const startIdx = chunkNum * CHUNK_SIZE + 1; // +1 to skip headers
+        const endIdx = Math.min(startIdx + CHUNK_SIZE, dataRowCount + 1);
+        const chunkData = [headers, ...fullData.slice(startIdx, endIdx)];
 
-      const controller = new AbortController();
-      // Increase timeout based on data size: 15 seconds per 1000 rows, minimum 60 seconds, maximum 2 hours
-      // Increased from 10s per 1000 rows to handle slower validations
-      const estimatedTimeMs = Math.max(60000, Math.min(7200000, (dataRowCount / 1000) * 15000 + 60000));
-      console.log(`⏱️ Setting validation timeout to ${(estimatedTimeMs / 1000).toFixed(0)} seconds for ${dataRowCount} rows`);
-      const timeoutId = setTimeout(() => {
-        console.warn(`⏱️ Validation timeout after ${estimatedTimeMs}ms - aborting`);
-        controller.abort();
-      }, estimatedTimeMs);
-
-      // Show that validation is in progress
-      const statusText = retryCount > 0
-        ? `Retrying validation of ${dataRowCount.toLocaleString()} rows (attempt ${retryCount + 1})...`
-        : `Validating ${dataRowCount.toLocaleString()} rows... This may take a moment for large files.`;
-      setMessage({ type: "warning", text: statusText });
-
-      const response = await fetch("/api/upload/validate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Request-Size": String(dataRowCount)
-        },
-        body: JSON.stringify({
-          type,
-          data: minimalData,
-          isMinimal: true,
-          originalIndices: { restaurantIdx, sapCodeIdx }
-        }),
-        signal: controller.signal
-      });
-
-      if (timeoutId) clearTimeout(timeoutId);
-
-      console.log(`Response received: status=${response.status}, ok=${response.ok}, headers=${JSON.stringify(Object.fromEntries(response.headers))}`);
-
-      if (!response.ok) {
-        let errorText = "Validation failed";
-        let isRetryable = false;
-        try {
-          const errorData = await response.json();
-          errorText = errorData.error || errorText;
-          isRetryable = errorData.retryable === true;
-        } catch (e) {
-          console.error("Failed to parse error response:", e);
-        }
-
-        // Retry if the error is retryable and we haven't exceeded retry limit
-        if (isRetryable && retryCount < 2) {
-          console.log(`Server returned retryable error (attempt ${retryCount + 2}/3). Retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          return validateData(fullData, retryCount + 1);
-        }
-
-        setMessage({ type: "error", text: errorText });
-        setIsValidating(false);
-        return;
-      }
-
-      let result;
-      try {
-        const responseText = await response.text();
-        if (!responseText) {
-          throw new Error("Empty response from validation server");
-        }
-        result = JSON.parse(responseText);
-        console.log(`Validation response parsed: validCount=${result.validCount}, invalidCount=${result.invalidCount}`);
-      } catch (parseError) {
-        console.error("Failed to parse validation response:", parseError);
-        const parseErrorMsg = parseError instanceof Error ? parseError.message : String(parseError);
-        throw new Error("Server validation response error: " + parseErrorMsg);
-      }
-
-      if (result.invalidCount > 0) {
-        // Map minimal row data back to original row data for display
-        const mappedInvalidRows = result.invalidRows.map((invalidRow: any) => {
-          const originalRow = fullData[invalidRow.rowIndex - 1]; // rowIndex is 1-based
-          return {
-            ...invalidRow,
-            data: originalRow
-          };
+        // Create minimal data for this chunk
+        const minimalChunkData = chunkData.map((row, idx) => {
+          if (idx === 0) return headers;
+          return [row[restaurantIdx], row[sapCodeIdx]];
         });
 
-        setValidationResult({
-          ...result,
-          invalidRows: mappedInvalidRows
-        });
-
-        // Select all valid rows by default
-        setSelectedValidRowIndices(result.validRows.map((r: any) => r.rowIndex));
+        console.log(`📦 Validating chunk ${chunkNum + 1}/${totalChunks} (rows ${startIdx}-${endIdx - 1})`);
         setMessage({
           type: "warning",
-          text: `Found ${result.invalidCount} invalid row(s) that will be removed on upload. Review and confirm below.`
+          text: `Validating... Chunk ${chunkNum + 1}/${totalChunks} (${Math.round(((chunkNum + 1) / totalChunks) * 100)}% complete)`
+        });
+
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds per chunk
+
+          const response = await fetch("/api/upload/validate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type,
+              data: minimalChunkData,
+              isMinimal: true,
+              originalIndices: { restaurantIdx, sapCodeIdx }
+            }),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            let errorText = `Chunk ${chunkNum + 1} validation failed`;
+            try {
+              const errorData = await response.json();
+              errorText = errorData.error || errorText;
+            } catch (e) {}
+            throw new Error(errorText);
+          }
+
+          const result = await response.json();
+          console.log(`✅ Chunk ${chunkNum + 1} validated: ${result.validCount} valid, ${result.invalidCount} invalid`);
+
+          totalValidCount += result.validCount;
+          totalInvalidCount += result.invalidCount;
+
+          // Collect invalid rows (map back to original row indices)
+          if (result.invalidRows && result.invalidRows.length > 0) {
+            result.invalidRows.forEach((row: any) => {
+              allInvalidRows.push({
+                ...row,
+                data: fullData[row.rowIndex - 1]
+              });
+            });
+          }
+
+          // Collect valid rows
+          if (result.validRows && result.validRows.length > 0) {
+            allValidRows.push(...result.validRows);
+          }
+        } catch (chunkError) {
+          console.error(`❌ Chunk ${chunkNum + 1} validation error:`, chunkError);
+          throw chunkError;
+        }
+      }
+
+      console.log(`✅ Validation complete: ${totalValidCount} valid, ${totalInvalidCount} invalid rows`);
+
+      if (totalInvalidCount > 0) {
+        setValidationResult({
+          validCount: totalValidCount,
+          invalidCount: totalInvalidCount,
+          validRows: allValidRows,
+          invalidRows: allInvalidRows
+        });
+
+        setSelectedValidRowIndices(allValidRows.map((r: any) => r.rowIndex));
+        setMessage({
+          type: "warning",
+          text: `Found ${totalInvalidCount} invalid row(s) that will be removed on upload. Review and confirm below.`
         });
       } else {
         setValidationResult(null);
@@ -344,57 +329,29 @@ export default function UploadTab({ type }: UploadTabProps) {
       setIsValidating(false);
     } catch (error) {
       console.error("Validation error:", error);
-      console.error("Error stack:", error instanceof Error ? error.stack : "No stack trace");
-
-      const isFetchError = error instanceof TypeError && error.message.includes("Failed to fetch");
-      const isAbortError = error instanceof Error && error.name === "AbortError";
-      const isNetworkError = isFetchError || isAbortError;
 
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("Error classification:", { isFetchError, isAbortError, isNetworkError, errorMessage });
-
-      // Retry logic for network errors
-      if (isNetworkError) {
-        if (retryCount < 2) {
-          const waitTime = 2000 + (retryCount * 1000); // Exponential backoff: 2s, 3s, 4s
-          console.log(`Retrying validation (attempt ${retryCount + 2}/3) after ${waitTime}ms...`);
-          setMessage({
-            type: "warning",
-            text: `${isAbortError ? "Request timeout" : "Connection error"}. Retrying (attempt ${retryCount + 2}/3)...`
-          });
-          // Wait before retrying with exponential backoff
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          return validateData(fullData, retryCount + 1);
-        }
-
-        // All retries failed
-        setMessage({
-          type: "error",
-          text: `Validation failed after 3 attempts (${isAbortError ? "timeout" : "connection error"}). Try: 1) Checking your internet connection, 2) Using a smaller file, 3) Uploading without validation by clicking "Upload anyway"`
-        });
-      } else {
-        setMessage({
-          type: "error",
-          text: `Validation failed: ${errorMessage}. You can still try uploading without validation.`
-        });
-      }
+      setMessage({
+        type: "error",
+        text: `Validation failed: ${errorMessage}`
+      });
       setIsValidating(false);
     }
   };
 
-  // Highly optimized chunked upload with parallel transfers and larger chunks
+  // Chunked upload - 1000 rows per chunk for stability
   const uploadInChunks = async (
     uploadBody: any,
     isUpdate: boolean = false
   ): Promise<boolean> => {
     const totalRows = uploadBody.rows;
-    const CHUNK_SIZE = 25000; // Increased from 5000 to 25000 rows per chunk = 5x faster
-    const MAX_PARALLEL = 4; // Upload 4 chunks in parallel for 4x speedup
+    const CHUNK_SIZE = 1000; // 1000 rows per chunk for stable, reliable uploads
+    const MAX_PARALLEL = 2; // Upload 2 chunks in parallel (reduced from 4 for stability)
     const data = uploadBody.data as any[];
     const headers = data[0];
     const dataRows = data.slice(1);
 
-    console.log(`📦 Starting optimized chunked upload: ${totalRows} total rows, chunk size: ${CHUNK_SIZE}, parallel: ${MAX_PARALLEL}`);
+    console.log(`📦 Starting stable chunked upload: ${totalRows} total rows, chunk size: ${CHUNK_SIZE}, parallel: ${MAX_PARALLEL}`);
 
     // Calculate number of chunks
     const numChunks = Math.ceil(dataRows.length / CHUNK_SIZE);
@@ -431,12 +388,12 @@ export default function UploadTab({ type }: UploadTabProps) {
         const batchEnd = Math.min(batchStart + MAX_PARALLEL, chunks.length);
         const batch = chunks.slice(batchStart, batchEnd);
 
-        console.log(`📤 Uploading parallel batch: chunks ${batchStart + 1}-${batchEnd} of ${numChunks}`);
+        console.log(`📤 Uploading batch ${Math.floor(batchStart / MAX_PARALLEL) + 1}: chunks ${batchStart + 1}-${batchEnd} of ${numChunks}`);
 
         // Upload batch in parallel
         const batchPromises = batch.map(async (chunk) => {
           const controller = new AbortController();
-          const timeoutMs = 180000; // 3 minutes per chunk
+          const timeoutMs = 90000; // 90 seconds per chunk (1000 rows = very fast)
           const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
           try {
@@ -517,10 +474,10 @@ export default function UploadTab({ type }: UploadTabProps) {
         uploadBody.validRowIndices = selectedValidRowIndices;
       }
 
-      // Use chunked upload for large files (>10000 rows), single request for small files
-      // This ensures better parallelization and faster uploads
+      // Use chunked upload for files >5000 rows, single request for small files
+      // Chunked approach is more reliable for all larger files
       let result;
-      if (fileData.rows > 10000) {
+      if (fileData.rows > 5000) {
         await uploadInChunks(uploadBody, false);
         // After all chunks uploaded successfully, finalize
         const finalizeResponse = await fetch("/api/upload/finalize", {
@@ -644,9 +601,9 @@ export default function UploadTab({ type }: UploadTabProps) {
         updateBody.validRowIndices = selectedValidRowIndices;
       }
 
-      // Use chunked upload for large files (>10000 rows), single request for small files
+      // Use chunked upload for files >5000 rows, single request for small files
       let result;
-      if (fileData.rows > 10000) {
+      if (fileData.rows > 5000) {
         await uploadInChunks(updateBody, true);
         // After all chunks uploaded successfully, finalize
         const finalizeResponse = await fetch("/api/upload/finalize", {

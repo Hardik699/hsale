@@ -50,9 +50,9 @@ async function getDatabase(): Promise<Db> {
     try {
       const client = new MongoClient(MONGODB_URI, {
         maxPoolSize: 10,
-        serverSelectionTimeoutMS: 10000, // Increased from 5s to give more time to connect
-        connectTimeoutMS: 15000, // Increased from 10s for slower connections
-        socketTimeoutMS: 600000, // 10 minutes - increased from 30s to handle large uploads
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 15000,
+        socketTimeoutMS: 300000, // 5 minutes for stable operations
         family: 4, // Use IPv4
       });
 
