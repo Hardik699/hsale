@@ -228,8 +228,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`🔍 Starting chunked validation for ${dataRowCount} rows (1000 rows per chunk)`);
       setMessage({ type: "warning", text: `Validating ${dataRowCount.toLocaleString()} rows in chunks... This may take a moment.` });
 
-      // Chunked validation - validate 10000 rows at a time
-      const CHUNK_SIZE = 10000;
+      // Chunked validation - validate 1000 rows at a time (smaller for validation stability)
+      const CHUNK_SIZE = 1000;
       const totalChunks = Math.ceil(dataRowCount / CHUNK_SIZE);
       const allValidRows = [];
       const allInvalidRows = [];
@@ -253,56 +253,79 @@ export default function UploadTab({ type }: UploadTabProps) {
           text: `Validating... Chunk ${chunkNum + 1}/${totalChunks} (${Math.round(((chunkNum + 1) / totalChunks) * 100)}% complete)`
         });
 
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds per chunk
+        // Validation with retry logic
+        let validationSuccess = false;
+        let validationRetries = 0;
+        const MAX_VALIDATION_RETRIES = 3;
 
-          const response = await fetch("/api/upload/validate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type,
-              data: minimalChunkData,
-              isMinimal: true,
-              originalIndices: { restaurantIdx, sapCodeIdx }
-            }),
-            signal: controller.signal
-          });
+        while (!validationSuccess && validationRetries < MAX_VALIDATION_RETRIES) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds per chunk
 
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            let errorText = `Chunk ${chunkNum + 1} validation failed`;
-            try {
-              const errorData = await response.json();
-              errorText = errorData.error || errorText;
-            } catch (e) {}
-            throw new Error(errorText);
-          }
-
-          const result = await response.json();
-          console.log(`✅ Chunk ${chunkNum + 1} validated: ${result.validCount} valid, ${result.invalidCount} invalid`);
-
-          totalValidCount += result.validCount;
-          totalInvalidCount += result.invalidCount;
-
-          // Collect invalid rows (map back to original row indices)
-          if (result.invalidRows && result.invalidRows.length > 0) {
-            result.invalidRows.forEach((row: any) => {
-              allInvalidRows.push({
-                ...row,
-                data: fullData[row.rowIndex - 1]
-              });
+            const response = await fetch("/api/upload/validate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type,
+                data: minimalChunkData,
+                isMinimal: true,
+                originalIndices: { restaurantIdx, sapCodeIdx }
+              }),
+              signal: controller.signal
             });
-          }
 
-          // Collect valid rows
-          if (result.validRows && result.validRows.length > 0) {
-            allValidRows.push(...result.validRows);
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              let errorText = `Chunk ${chunkNum + 1} validation failed`;
+              try {
+                const errorData = await response.json();
+                errorText = errorData.error || errorText;
+              } catch (e) {}
+              throw new Error(errorText);
+            }
+
+            const result = await response.json();
+            console.log(`✅ Chunk ${chunkNum + 1} validated: ${result.validCount} valid, ${result.invalidCount} invalid`);
+
+            totalValidCount += result.validCount;
+            totalInvalidCount += result.invalidCount;
+
+            // Collect invalid rows (map back to original row indices)
+            if (result.invalidRows && result.invalidRows.length > 0) {
+              result.invalidRows.forEach((row: any) => {
+                allInvalidRows.push({
+                  ...row,
+                  data: fullData[row.rowIndex - 1]
+                });
+              });
+            }
+
+            // Collect valid rows
+            if (result.validRows && result.validRows.length > 0) {
+              allValidRows.push(...result.validRows);
+            }
+
+            validationSuccess = true;
+
+          } catch (chunkError) {
+            validationRetries++;
+            const errorMsg = chunkError instanceof Error ? chunkError.message : String(chunkError);
+            console.error(`❌ Chunk ${chunkNum + 1} validation attempt ${validationRetries} failed:`, errorMsg);
+
+            if (validationRetries < MAX_VALIDATION_RETRIES) {
+              const waitMs = 2000 * validationRetries; // 2s, 4s wait between retries
+              console.log(`  Retrying validation in ${waitMs}ms...`);
+              setMessage({
+                type: "warning",
+                text: `Validation retry ${validationRetries}/${MAX_VALIDATION_RETRIES} for chunk ${chunkNum + 1}/${totalChunks}...`
+              });
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Chunk ${chunkNum + 1} validation failed after ${MAX_VALIDATION_RETRIES} attempts: ${errorMsg}`);
+            }
           }
-        } catch (chunkError) {
-          console.error(`❌ Chunk ${chunkNum + 1} validation error:`, chunkError);
-          throw chunkError;
         }
       }
 
