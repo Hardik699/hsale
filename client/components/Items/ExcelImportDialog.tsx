@@ -169,8 +169,39 @@ export default function ExcelImportDialog({
 
     try {
       // Fetch existing items from database to check for duplicate variations
-      const existingItemsResponse = await fetch("/api/items");
-      const existingItems: any[] = await existingItemsResponse.json();
+      let existingItemsResponse;
+      try {
+        existingItemsResponse = await fetch("/api/items");
+      } catch (fetchError) {
+        setError(
+          `Network error while fetching items: ${
+            fetchError instanceof Error ? fetchError.message : "Unknown error"
+          }`
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (!existingItemsResponse.ok) {
+        setError(
+          `Failed to fetch existing items: ${existingItemsResponse.status} ${existingItemsResponse.statusText}`
+        );
+        setLoading(false);
+        return;
+      }
+
+      let existingItems: any[] = [];
+      try {
+        existingItems = await existingItemsResponse.json();
+      } catch (parseError) {
+        setError(
+          `Failed to parse items data: ${
+            parseError instanceof Error ? parseError.message : "Unknown error"
+          }`
+        );
+        setLoading(false);
+        return;
+      }
 
       // Build a map of normalized variation values from existing items
       const existingVariationsMap = new Map<string, Set<string>>();
@@ -272,22 +303,27 @@ export default function ExcelImportDialog({
             });
 
             // Update the existing item with new variations
-            const updateResponse = await fetch(`/api/items/${existingItem.itemId}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                variations: [...(existingItem.variations || []), ...variationsToAdd],
-              }),
-            });
+            try {
+              const updateResponse = await fetch(`/api/items/${existingItem.itemId}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  variations: [...(existingItem.variations || []), ...variationsToAdd],
+                }),
+              });
 
-            if (updateResponse.ok) {
-              createdItems.push({ ...existingItem, variations: [...(existingItem.variations || []), ...variationsToAdd] });
-              successCount++;
-            } else {
+              if (updateResponse.ok) {
+                createdItems.push({ ...existingItem, variations: [...(existingItem.variations || []), ...variationsToAdd] });
+                successCount++;
+              } else {
+                failCount++;
+                console.error(
+                  `Failed to add variations to ${item.itemName}: ${updateResponse.status} ${updateResponse.statusText}`
+                );
+              }
+            } catch (err) {
               failCount++;
-              console.error(
-                `Failed to add variations to ${item.itemName}: ${updateResponse.statusText}`
-              );
+              console.error(`Network error updating ${item.itemName}:`, err);
             }
             continue;
           }
@@ -352,21 +388,31 @@ export default function ExcelImportDialog({
             images: [],
           };
 
-          const response = await fetch("/api/items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(itemToCreate),
-          });
+          try {
+            const response = await fetch("/api/items", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(itemToCreate),
+            });
 
-          if (response.ok) {
-            const createdItem = await response.json();
-            createdItems.push(createdItem);
-            successCount++;
-          } else {
+            if (response.ok) {
+              try {
+                const createdItem = await response.json();
+                createdItems.push(createdItem);
+                successCount++;
+              } catch (parseErr) {
+                failCount++;
+                console.error(`Failed to parse response for ${item.itemName}:`, parseErr);
+              }
+            } else {
+              failCount++;
+              console.error(
+                `Failed to create ${item.itemName}: ${response.status} ${response.statusText}`
+              );
+            }
+          } catch (networkErr) {
             failCount++;
-            console.error(
-              `Failed to create ${item.itemName}: ${response.statusText}`
-            );
+            console.error(`Network error creating ${item.itemName}:`, networkErr);
           }
         } catch (err) {
           failCount++;
