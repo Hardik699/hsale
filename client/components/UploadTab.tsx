@@ -339,26 +339,22 @@ export default function UploadTab({ type }: UploadTabProps) {
     }
   };
 
-  // Chunked upload - 1000 rows per chunk for stability
+  // Sequential chunked upload - 1 chunk at a time for server stability
   const uploadInChunks = async (
     uploadBody: any,
     isUpdate: boolean = false
   ): Promise<boolean> => {
     const totalRows = uploadBody.rows;
-    const CHUNK_SIZE = 1000; // 1000 rows per chunk for stable, reliable uploads
-    const MAX_PARALLEL = 2; // Upload 2 chunks in parallel (reduced from 4 for stability)
+    const CHUNK_SIZE = 1000; // 1000 rows per chunk
     const data = uploadBody.data as any[];
     const headers = data[0];
     const dataRows = data.slice(1);
 
-    console.log(`📦 Starting stable chunked upload: ${totalRows} total rows, chunk size: ${CHUNK_SIZE}, parallel: ${MAX_PARALLEL}`);
-
-    // Calculate number of chunks
     const numChunks = Math.ceil(dataRows.length / CHUNK_SIZE);
+    console.log(`📦 Starting sequential chunked upload: ${totalRows} rows, ${numChunks} chunks of ${CHUNK_SIZE} rows each`);
 
     try {
-      // Prepare all chunk bodies upfront
-      const chunks = [];
+      // Upload chunks ONE AT A TIME (sequential, not parallel)
       for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
         const startIdx = chunkIndex * CHUNK_SIZE;
         const endIdx = Math.min(startIdx + CHUNK_SIZE, dataRows.length);
@@ -379,31 +375,32 @@ export default function UploadTab({ type }: UploadTabProps) {
           delete chunkBody.validRowIndices;
         }
 
-        chunks.push({ index: chunkIndex, body: chunkBody });
-      }
+        console.log(`📤 Uploading chunk ${chunkIndex + 1}/${numChunks} (rows ${startIdx + 1}-${endIdx})`);
+        setMessage({
+          type: "warning",
+          text: `Uploading chunk ${chunkIndex + 1}/${numChunks}... (${Math.round(((chunkIndex + 1) / numChunks) * 100)}% complete)`
+        });
 
-      // Upload chunks in parallel batches
-      let uploadedChunks = 0;
-      for (let batchStart = 0; batchStart < chunks.length; batchStart += MAX_PARALLEL) {
-        const batchEnd = Math.min(batchStart + MAX_PARALLEL, chunks.length);
-        const batch = chunks.slice(batchStart, batchEnd);
+        // Upload single chunk with retry logic
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+        let chunkSuccess = false;
 
-        console.log(`📤 Uploading batch ${Math.floor(batchStart / MAX_PARALLEL) + 1}: chunks ${batchStart + 1}-${batchEnd} of ${numChunks}`);
-
-        // Upload batch in parallel
-        const batchPromises = batch.map(async (chunk) => {
-          const controller = new AbortController();
-          const timeoutMs = 90000; // 90 seconds per chunk (1000 rows = very fast)
-          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
+        while (retryCount < MAX_RETRIES && !chunkSuccess) {
           try {
-            const method = isUpdate && chunk.index === 0 ? "PUT" : "POST";
-            const endpoint = isUpdate && chunk.index === 0 ? "/api/upload" : "/api/upload/chunk";
+            const controller = new AbortController();
+            const timeoutMs = 120000; // 2 minutes per chunk (sequential = slower but stable)
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            const method = isUpdate && chunkIndex === 0 ? "PUT" : "POST";
+            const endpoint = isUpdate && chunkIndex === 0 ? "/api/upload" : "/api/upload/chunk";
+
+            console.log(`  Attempt ${retryCount + 1}/${MAX_RETRIES}: Uploading ${chunkRows} rows to ${endpoint}`);
 
             const response = await fetch(endpoint, {
               method,
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(chunk.body),
+              body: JSON.stringify(chunkBody),
               signal: controller.signal
             });
 
@@ -415,27 +412,31 @@ export default function UploadTab({ type }: UploadTabProps) {
                 const errorData = await response.json();
                 errorText = errorData.error || errorText;
               } catch (e) {}
-              throw new Error(`${errorText} (chunk ${chunk.index + 1}/${numChunks})`);
+              throw new Error(`Server error: ${errorText}`);
             }
 
-            return chunk.index;
-          } catch (chunkError) {
-            console.error(`❌ Chunk ${chunk.index + 1} failed:`, chunkError);
-            throw chunkError;
+            const result = await response.json();
+            console.log(`✅ Chunk ${chunkIndex + 1} uploaded successfully:`, result.message);
+            chunkSuccess = true;
+
+            // Update progress
+            const progress = Math.round(((chunkIndex + 1) / numChunks) * 100);
+            setUploadProgress(progress);
+
+          } catch (error) {
+            retryCount++;
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`❌ Chunk ${chunkIndex + 1} attempt ${retryCount} failed:`, errorMsg);
+
+            if (retryCount < MAX_RETRIES) {
+              const waitMs = 2000 * retryCount; // 2s, 4s, 6s wait between retries
+              console.log(`  Retrying in ${waitMs}ms...`);
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Chunk ${chunkIndex + 1} failed after ${MAX_RETRIES} attempts: ${errorMsg}`);
+            }
           }
-        });
-
-        // Wait for batch to complete
-        await Promise.all(batchPromises);
-        uploadedChunks += batch.length;
-
-        // Update progress
-        const progress = Math.round((uploadedChunks / numChunks) * 100);
-        setUploadProgress(progress);
-        setMessage({
-          type: "warning",
-          text: `Uploading... ${progress}% complete (${uploadedChunks}/${numChunks} chunks)`
-        });
+        }
       }
 
       return true;
@@ -478,22 +479,67 @@ export default function UploadTab({ type }: UploadTabProps) {
       // Chunked approach is more reliable for all larger files
       let result;
       if (fileData.rows > 5000) {
-        await uploadInChunks(uploadBody, false);
-        // After all chunks uploaded successfully, finalize
-        const finalizeResponse = await fetch("/api/upload/finalize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type,
-            year: selectedYear,
-            month: selectedMonth
-          })
-        });
+        console.log("🔼 All chunks uploaded successfully, finalizing...");
 
-        if (!finalizeResponse.ok) {
-          throw new Error("Failed to finalize upload");
+        // Wait a moment before finalizing to let server process chunks
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Finalize with retry logic
+        let finalizeSuccess = false;
+        let finalizeRetries = 0;
+        const MAX_FINALIZE_RETRIES = 3;
+
+        while (!finalizeSuccess && finalizeRetries < MAX_FINALIZE_RETRIES) {
+          try {
+            console.log(`🔄 Finalize attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES}`);
+            setMessage({
+              type: "warning",
+              text: `Finalizing upload (attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES})...`
+            });
+
+            const finalizeController = new AbortController();
+            const finalizeTimeoutId = setTimeout(() => finalizeController.abort(), 60000); // 60 seconds
+
+            const finalizeResponse = await fetch("/api/upload/finalize", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type,
+                year: selectedYear,
+                month: selectedMonth
+              }),
+              signal: finalizeController.signal
+            });
+
+            clearTimeout(finalizeTimeoutId);
+
+            if (!finalizeResponse.ok) {
+              let errorText = "Failed to finalize upload";
+              try {
+                const errorData = await finalizeResponse.json();
+                errorText = errorData.error || errorText;
+              } catch (e) {}
+              throw new Error(errorText);
+            }
+
+            result = await finalizeResponse.json();
+            finalizeSuccess = true;
+            console.log("✅ Upload finalized successfully:", result);
+
+          } catch (finalizeError) {
+            finalizeRetries++;
+            const errorMsg = finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
+            console.error(`❌ Finalize attempt ${finalizeRetries} failed:`, errorMsg);
+
+            if (finalizeRetries < MAX_FINALIZE_RETRIES) {
+              const waitMs = 3000 * finalizeRetries; // 3s, 6s, 9s wait
+              console.log(`  Retrying in ${waitMs}ms...`);
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Upload finalization failed after ${MAX_FINALIZE_RETRIES} attempts: ${errorMsg}`);
+            }
+          }
         }
-        result = await finalizeResponse.json();
       } else {
         // Small file - use single request
         const controller = new AbortController();
@@ -604,23 +650,68 @@ export default function UploadTab({ type }: UploadTabProps) {
       // Use chunked upload for files >5000 rows, single request for small files
       let result;
       if (fileData.rows > 5000) {
-        await uploadInChunks(updateBody, true);
-        // After all chunks uploaded successfully, finalize
-        const finalizeResponse = await fetch("/api/upload/finalize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type,
-            year: selectedYear,
-            month: selectedMonth,
-            isUpdate: true
-          })
-        });
+        console.log("🔼 All update chunks uploaded successfully, finalizing...");
 
-        if (!finalizeResponse.ok) {
-          throw new Error("Failed to finalize update");
+        // Wait a moment before finalizing to let server process chunks
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Finalize with retry logic
+        let finalizeSuccess = false;
+        let finalizeRetries = 0;
+        const MAX_FINALIZE_RETRIES = 3;
+
+        while (!finalizeSuccess && finalizeRetries < MAX_FINALIZE_RETRIES) {
+          try {
+            console.log(`🔄 Update finalize attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES}`);
+            setMessage({
+              type: "warning",
+              text: `Finalizing update (attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES})...`
+            });
+
+            const finalizeController = new AbortController();
+            const finalizeTimeoutId = setTimeout(() => finalizeController.abort(), 60000); // 60 seconds
+
+            const finalizeResponse = await fetch("/api/upload/finalize", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type,
+                year: selectedYear,
+                month: selectedMonth,
+                isUpdate: true
+              }),
+              signal: finalizeController.signal
+            });
+
+            clearTimeout(finalizeTimeoutId);
+
+            if (!finalizeResponse.ok) {
+              let errorText = "Failed to finalize update";
+              try {
+                const errorData = await finalizeResponse.json();
+                errorText = errorData.error || errorText;
+              } catch (e) {}
+              throw new Error(errorText);
+            }
+
+            result = await finalizeResponse.json();
+            finalizeSuccess = true;
+            console.log("✅ Update finalized successfully:", result);
+
+          } catch (finalizeError) {
+            finalizeRetries++;
+            const errorMsg = finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
+            console.error(`❌ Update finalize attempt ${finalizeRetries} failed:`, errorMsg);
+
+            if (finalizeRetries < MAX_FINALIZE_RETRIES) {
+              const waitMs = 3000 * finalizeRetries; // 3s, 6s, 9s wait
+              console.log(`  Retrying in ${waitMs}ms...`);
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Update finalization failed after ${MAX_FINALIZE_RETRIES} attempts: ${errorMsg}`);
+            }
+          }
         }
-        result = await finalizeResponse.json();
       } else {
         // Small file - use single request
         const controller = new AbortController();

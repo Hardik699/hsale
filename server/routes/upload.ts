@@ -762,7 +762,7 @@ export const handleDeleteUpload: RequestHandler = async (req, res) => {
   }
 };
 
-// POST /api/upload/chunk - Handle chunked uploads
+// POST /api/upload/chunk - Handle chunked uploads (sequential uploads)
 export const handleChunkUpload: RequestHandler = async (req, res) => {
   try {
     const { type, year, month, data, rows, columns, chunkIndex, totalChunks, isChunked, validRowIndices } = req.body;
@@ -774,7 +774,7 @@ export const handleChunkUpload: RequestHandler = async (req, res) => {
 
     const storageKey = `${type}_${year}_${month}`;
 
-    console.log(`📦 Received chunk ${chunkIndex + 1}/${totalChunks} for ${storageKey} (${rows} rows)`);
+    console.log(`📦 Received chunk ${chunkIndex + 1}/${totalChunks} for ${storageKey} (${rows} rows, data size: ${JSON.stringify(data).length} bytes)`);
 
     // Initialize storage for this upload if it doesn't exist
     if (!chunkStorage[storageKey]) {
@@ -790,33 +790,43 @@ export const handleChunkUpload: RequestHandler = async (req, res) => {
         },
         timestamp: Date.now()
       };
+      console.log(`  🆕 Created new chunk storage for ${storageKey}`);
+    }
+
+    // Validate chunk data
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.status(400).json({ error: `Chunk ${chunkIndex + 1} contains no data` });
     }
 
     // Store the chunk (first chunk includes headers)
     const headers = chunkIndex === 0 ? data[0] : null;
     if (chunkIndex === 0) {
       chunkStorage[storageKey].metadata.headers = headers;
+      console.log(`  📋 Stored headers for ${storageKey}`);
     }
 
+    // Store chunk data (without headers for non-first chunks)
+    const chunkDataToStore = data.slice(1); // Always remove headers row
     chunkStorage[storageKey].chunks[chunkIndex] = {
       index: chunkIndex,
-      data: data.slice(1), // Remove headers from chunk (they're the same for all chunks)
-      rows
+      data: chunkDataToStore,
+      rows: chunkDataToStore.length
     };
 
     const receivedChunks = chunkStorage[storageKey].chunks.filter(c => c !== undefined).length;
-    console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} stored. Progress: ${receivedChunks}/${totalChunks} chunks received`);
+    console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} stored successfully. Progress: ${receivedChunks}/${totalChunks} chunks`);
 
     // Check if all chunks have been received
     const allChunksReceived = receivedChunks === totalChunks;
 
     res.json({
       success: true,
-      message: `Chunk ${chunkIndex + 1}/${totalChunks} received`,
+      message: `Chunk ${chunkIndex + 1}/${totalChunks} received and stored`,
       chunkIndex,
       allChunksReceived,
       receivedChunks,
-      totalChunks
+      totalChunks,
+      storageKey
     });
   } catch (error) {
     console.error("❌ Chunk upload error:", error);
@@ -956,38 +966,50 @@ export const handleFinalizeUpload: RequestHandler = async (req, res) => {
     }
 
     console.log(`🔄 Finalizing upload for ${storageKey}`);
+    console.log(`  📊 Storage info: ${chunks.length} chunks stored, ${totalChunks} expected`);
 
     // Verify all chunks are present
     const { chunks, totalChunks, metadata } = uploadData;
     const receivedChunks = chunks.filter(c => c !== undefined).length;
 
+    console.log(`  ✓ Received chunks: ${receivedChunks}/${totalChunks}`);
+
     if (receivedChunks !== totalChunks) {
+      console.error(`  ❌ Missing chunks! Expected ${totalChunks}, received ${receivedChunks}`);
       return res.status(400).json({
         error: `Missing chunks. Expected ${totalChunks}, received ${receivedChunks}`
       });
     }
 
     // Combine all chunks efficiently
+    console.log(`  🔗 Combining ${chunks.length} chunks...`);
     const combinedDataRows: any[] = [];
     let totalRowsInChunks = 0;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      if (!chunk) {
-        throw new Error(`Chunk ${i} is missing`);
-      }
-      // Use spread for small chunks, push for large data
-      if (chunk.data.length > 1000) {
-        combinedDataRows.push(...chunk.data);
-      } else {
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        if (!chunk) {
+          throw new Error(`Chunk ${i} is missing from storage`);
+        }
+
+        console.log(`    Processing chunk ${i + 1}: ${chunk.data.length} rows`);
+
+        // Add chunk data to combined array
         for (const row of chunk.data) {
           combinedDataRows.push(row);
         }
+        totalRowsInChunks += chunk.rows;
       }
-      totalRowsInChunks += chunk.rows;
+    } catch (combineError) {
+      const errorMsg = combineError instanceof Error ? combineError.message : String(combineError);
+      console.error(`  ❌ Error combining chunks:`, errorMsg);
+      return res.status(500).json({
+        error: `Failed to combine chunks: ${errorMsg}`
+      });
     }
 
-    console.log(`✅ Combined ${chunks.length} chunks into ${combinedDataRows.length} data rows`);
+    console.log(`✅ Combined ${chunks.length} chunks into ${combinedDataRows.length} total data rows`);
 
     // Get headers from metadata (stored from first chunk)
     const headers = metadata.headers || [];
@@ -1012,55 +1034,74 @@ export const handleFinalizeUpload: RequestHandler = async (req, res) => {
     }
 
     // Handle insert or update
+    console.log(`  💾 Saving to database: ${totalRows} rows, ${metadata.columns} columns`);
+
     if (isUpdate) {
       console.log(`🔄 Updating existing data for ${storageKey}`);
-      const result = await collection.updateOne(
-        { year, month },
-        {
-          $set: {
-            rows: totalRows,
-            columns: metadata.columns,
-            data: finalData,
-            updatedAt: new Date(),
-            status: "updated"
+      try {
+        const result = await collection.updateOne(
+          { year, month },
+          {
+            $set: {
+              rows: totalRows,
+              columns: metadata.columns,
+              data: finalData,
+              updatedAt: new Date(),
+              status: "updated"
+            }
           }
+        );
+
+        if (result.matchedCount === 0) {
+          console.error(`  ❌ No document found to update for ${storageKey}`);
+          return res.status(404).json({ error: "Data not found for update" });
         }
-      );
 
-      if (result.matchedCount === 0) {
-        return res.status(404).json({ error: "Data not found for update" });
+        console.log(`✅ Update finalized for ${storageKey}: ${totalRows} rows updated`);
+      } catch (dbError) {
+        const errorMsg = dbError instanceof Error ? dbError.message : String(dbError);
+        console.error(`  ❌ Database update failed: ${errorMsg}`);
+        throw dbError;
       }
-
-      console.log(`✅ Update finalized for ${storageKey}: ${totalRows} rows`);
     } else {
       // Check if data already exists
-      const existingData = await collection.findOne({ year, month });
-      if (existingData) {
-        return res.status(409).json({
-          error: "Data already exists for this month",
-          exists: true
-        });
-      }
-
-      console.log(`💾 Inserting new data for ${storageKey}: ${totalRows} rows`);
-      await collection.insertOne({
-        year,
-        month,
-        rows: totalRows,
-        columns: metadata.columns,
-        data: finalData,
-        uploadedAt: new Date(),
-        status: "uploaded"
-      });
-
-      // Process and create items from petpooja data
-      if (type === "petpooja") {
-        try {
-          await processAndCreateItemsFromPetpooja(db, finalData);
-        } catch (itemError) {
-          console.error("⚠️ Warning: Failed to auto-create items from upload:", itemError);
-          // Don't fail the upload if item creation fails
+      try {
+        const existingData = await collection.findOne({ year, month });
+        if (existingData) {
+          console.warn(`  ⚠️ Data already exists for ${storageKey}`);
+          return res.status(409).json({
+            error: "Data already exists for this month",
+            exists: true
+          });
         }
+
+        console.log(`💾 Inserting new data for ${storageKey}: ${totalRows} rows`);
+        const insertResult = await collection.insertOne({
+          year,
+          month,
+          rows: totalRows,
+          columns: metadata.columns,
+          data: finalData,
+          uploadedAt: new Date(),
+          status: "uploaded"
+        });
+
+        console.log(`✅ Data inserted successfully, document ID: ${insertResult.insertedId}`);
+
+        // Process and create items from petpooja data
+        if (type === "petpooja") {
+          try {
+            console.log(`  🔍 Processing items from petpooja data...`);
+            await processAndCreateItemsFromPetpooja(db, finalData);
+          } catch (itemError) {
+            console.error("⚠️ Warning: Failed to auto-create items from upload:", itemError);
+            // Don't fail the upload if item creation fails
+          }
+        }
+      } catch (dbError) {
+        const errorMsg = dbError instanceof Error ? dbError.message : String(dbError);
+        console.error(`  ❌ Database insert failed: ${errorMsg}`);
+        throw dbError;
       }
     }
 
