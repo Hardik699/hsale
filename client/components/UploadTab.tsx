@@ -228,8 +228,8 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`🔍 Starting chunked validation for ${dataRowCount} rows (1000 rows per chunk)`);
       setMessage({ type: "warning", text: `Validating ${dataRowCount.toLocaleString()} rows in chunks... This may take a moment.` });
 
-      // Chunked validation - validate 1000 rows at a time
-      const CHUNK_SIZE = 1000;
+      // Chunked validation - validate 10000 rows at a time
+      const CHUNK_SIZE = 10000;
       const totalChunks = Math.ceil(dataRowCount / CHUNK_SIZE);
       const allValidRows = [];
       const allInvalidRows = [];
@@ -345,7 +345,8 @@ export default function UploadTab({ type }: UploadTabProps) {
     isUpdate: boolean = false
   ): Promise<boolean> => {
     const totalRows = uploadBody.rows;
-    const CHUNK_SIZE = 1000; // 1000 rows per chunk
+    const CHUNK_SIZE = 10000; // 10000 rows per chunk
+    const DELAY_BETWEEN_CHUNKS = 20000; // 20 seconds delay between chunks
     const data = uploadBody.data as any[];
     const headers = data[0];
     const dataRows = data.slice(1);
@@ -383,13 +384,13 @@ export default function UploadTab({ type }: UploadTabProps) {
 
         // Upload single chunk with retry logic
         let retryCount = 0;
-        const MAX_RETRIES = 3;
+        const MAX_RETRIES = 5; // Increased from 3 to 5 for better reliability
         let chunkSuccess = false;
 
         while (retryCount < MAX_RETRIES && !chunkSuccess) {
           try {
             const controller = new AbortController();
-            const timeoutMs = 120000; // 2 minutes per chunk (sequential = slower but stable)
+            const timeoutMs = 180000; // 3 minutes per chunk for larger data
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             const method = isUpdate && chunkIndex === 0 ? "PUT" : "POST";
@@ -423,19 +424,37 @@ export default function UploadTab({ type }: UploadTabProps) {
             const progress = Math.round(((chunkIndex + 1) / numChunks) * 100);
             setUploadProgress(progress);
 
+            // Add 20-second delay before next chunk (except for last chunk)
+            if (chunkIndex < numChunks - 1) {
+              console.log(`⏳ Waiting ${DELAY_BETWEEN_CHUNKS / 1000}s before next chunk...`);
+              setMessage({
+                type: "warning",
+                text: `Chunk uploaded. Waiting ${DELAY_BETWEEN_CHUNKS / 1000}s before next chunk...`
+              });
+              await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS));
+            }
+
           } catch (error) {
             retryCount++;
             const errorMsg = error instanceof Error ? error.message : String(error);
             console.error(`❌ Chunk ${chunkIndex + 1} attempt ${retryCount} failed:`, errorMsg);
 
             if (retryCount < MAX_RETRIES) {
-              const waitMs = 2000 * retryCount; // 2s, 4s, 6s wait between retries
+              const waitMs = 3000 * retryCount; // 3s, 6s, 9s, 12s, 15s wait between retries
               console.log(`  Retrying in ${waitMs}ms...`);
+              setMessage({
+                type: "warning",
+                text: `Chunk failed. Retrying in ${waitMs / 1000}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`
+              });
               await new Promise(resolve => setTimeout(resolve, waitMs));
             } else {
               throw new Error(`Chunk ${chunkIndex + 1} failed after ${MAX_RETRIES} attempts: ${errorMsg}`);
             }
           }
+        }
+
+        if (!chunkSuccess) {
+          throw new Error(`Chunk ${chunkIndex + 1} failed - all retry attempts exhausted`);
         }
       }
 
