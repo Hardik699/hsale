@@ -352,21 +352,38 @@ export default function ItemEdit() {
 
   const saveHsnCodeChanges = async () => {
     try {
-      const response = await fetch(`/api/items/hsn-codes/${encodeURIComponent(selectedHsnCodeForEdit)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newCode: editingHsnCode }),
-      });
-      if (response.ok) {
-        const updated = hsnCodes.map(c => c === selectedHsnCodeForEdit ? editingHsnCode : c);
-        setHsnCodes(updated);
-        if (hsnCode === selectedHsnCodeForEdit) {
-          setHsnCode(editingHsnCode);
-        }
-        setShowEditHsnCodeModal(false);
+      console.log(`🔄 Saving HSN code: "${selectedHsnCodeForEdit}" -> "${editingHsnCode}"`);
+
+      let response;
+      try {
+        response = await fetch(`/api/items/hsn-codes/${encodeURIComponent(selectedHsnCodeForEdit)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newCode: editingHsnCode }),
+        });
+      } catch (fetchError) {
+        console.error("❌ Network error during fetch:", fetchError);
+        alert(`Network error: ${fetchError instanceof Error ? fetchError.message : "Failed to connect to server"}`);
+        return;
       }
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        console.error(`❌ Server error ${response.status}:`, errorText);
+        alert(`Error saving HSN code: ${response.status} ${response.statusText}`);
+        return;
+      }
+
+      const updated = hsnCodes.map(c => c === selectedHsnCodeForEdit ? editingHsnCode : c);
+      setHsnCodes(updated);
+      if (hsnCode === selectedHsnCodeForEdit) {
+        setHsnCode(editingHsnCode);
+      }
+      setShowEditHsnCodeModal(false);
+      console.log("✅ HSN code saved successfully");
     } catch (error) {
-      console.error("Failed to save HSN code changes:", error);
+      console.error("❌ Failed to save HSN code changes:", error);
+      alert(`Error: ${error instanceof Error ? error.message : "Failed to save HSN code"}`);
     }
   };
 
@@ -378,41 +395,75 @@ export default function ItemEdit() {
 
   const saveVariationValueChanges = async () => {
     try {
-      const response = await fetch(`/api/items/variation-values/${encodeURIComponent(selectedVariationValueForEdit)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newValue: editingVariationValue }),
-      });
-      if (response.ok) {
-        const updated = variationValues.map(v => v === selectedVariationValueForEdit ? editingVariationValue : v);
-        setVariationValues(updated);
+      console.log(`🔄 Saving variation value: "${selectedVariationValueForEdit}" -> "${editingVariationValue}"`);
 
-        // Update variation values in current state
-        setVariations(variations.map(v => v.value === selectedVariationValueForEdit ? { ...v, value: editingVariationValue } : v));
-
-        setShowEditVariationValueModal(false);
+      let response;
+      try {
+        response = await fetch(`/api/items/variation-values/${encodeURIComponent(selectedVariationValueForEdit)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newValue: editingVariationValue }),
+        });
+      } catch (fetchError) {
+        console.error("❌ Network error during fetch:", fetchError);
+        alert(`Network error: ${fetchError instanceof Error ? fetchError.message : "Failed to connect to server"}`);
+        return;
       }
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        console.error(`❌ Server error ${response.status}:`, errorText);
+        alert(`Error saving variation value: ${response.status} ${response.statusText}`);
+        return;
+      }
+
+      const updated = variationValues.map(v => v === selectedVariationValueForEdit ? editingVariationValue : v);
+      setVariationValues(updated);
+
+      // Update variation values in current state
+      setVariations(variations.map(v => v.value === selectedVariationValueForEdit ? { ...v, value: editingVariationValue } : v));
+
+      setShowEditVariationValueModal(false);
+      console.log("✅ Variation value saved successfully");
     } catch (error) {
-      console.error("Failed to save variation value changes:", error);
+      console.error("❌ Failed to save variation value changes:", error);
+      alert(`Error: ${error instanceof Error ? error.message : "Failed to save variation value"}`);
     }
   };
 
   const addGroup = async () => {
     if (newGroup.trim() && !groups.includes(newGroup)) {
       try {
-        const response = await fetch("/api/items/groups", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: newGroup }),
-        });
-        if (response.ok) {
-          const updated = [...groups, newGroup];
-          setGroups(updated);
-          setGroup(newGroup);
-          setNewGroup("");
+        console.log(`🔄 Adding new group: "${newGroup}"`);
+
+        let response;
+        try {
+          response = await fetch("/api/items/groups", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: newGroup }),
+          });
+        } catch (fetchError) {
+          console.error("❌ Network error during fetch:", fetchError);
+          alert(`Network error: ${fetchError instanceof Error ? fetchError.message : "Failed to connect to server"}`);
+          return;
         }
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          console.error(`❌ Server error ${response.status}:`, errorText);
+          alert(`Error adding group: ${response.status} ${response.statusText}`);
+          return;
+        }
+
+        const updated = [...groups, newGroup];
+        setGroups(updated);
+        setGroup(newGroup);
+        setNewGroup("");
+        console.log("✅ Group added successfully");
       } catch (error) {
-        console.error("Failed to add group:", error);
+        console.error("❌ Failed to add group:", error);
+        alert(`Error: ${error instanceof Error ? error.message : "Failed to add group"}`);
       }
     }
   };
@@ -420,19 +471,36 @@ export default function ItemEdit() {
   const addCategory = async () => {
     if (newCategory.trim() && !categories.includes(newCategory)) {
       try {
-        const response = await fetch("/api/items/categories", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: newCategory }),
-        });
-        if (response.ok) {
-          const updated = [...categories, newCategory];
-          setCategories(updated);
-          setCategory(newCategory);
-          setNewCategory("");
+        console.log(`🔄 Adding new category: "${newCategory}"`);
+
+        let response;
+        try {
+          response = await fetch("/api/items/categories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: newCategory }),
+          });
+        } catch (fetchError) {
+          console.error("❌ Network error during fetch:", fetchError);
+          alert(`Network error: ${fetchError instanceof Error ? fetchError.message : "Failed to connect to server"}`);
+          return;
         }
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          console.error(`❌ Server error ${response.status}:`, errorText);
+          alert(`Error adding category: ${response.status} ${response.statusText}`);
+          return;
+        }
+
+        const updated = [...categories, newCategory];
+        setCategories(updated);
+        setCategory(newCategory);
+        setNewCategory("");
+        console.log("✅ Category added successfully");
       } catch (error) {
-        console.error("Failed to add category:", error);
+        console.error("❌ Failed to add category:", error);
+        alert(`Error: ${error instanceof Error ? error.message : "Failed to add category"}`);
       }
     }
   };
@@ -440,19 +508,36 @@ export default function ItemEdit() {
   const addHsnCode = async () => {
     if (newHsnCode.trim() && !hsnCodes.includes(newHsnCode)) {
       try {
-        const response = await fetch("/api/items/hsn-codes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: newHsnCode }),
-        });
-        if (response.ok) {
-          const updated = [...hsnCodes, newHsnCode];
-          setHsnCodes(updated);
-          setHsnCode(newHsnCode);
-          setNewHsnCode("");
+        console.log(`🔄 Adding new HSN code: "${newHsnCode}"`);
+
+        let response;
+        try {
+          response = await fetch("/api/items/hsn-codes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: newHsnCode }),
+          });
+        } catch (fetchError) {
+          console.error("❌ Network error during fetch:", fetchError);
+          alert(`Network error: ${fetchError instanceof Error ? fetchError.message : "Failed to connect to server"}`);
+          return;
         }
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          console.error(`❌ Server error ${response.status}:`, errorText);
+          alert(`Error adding HSN code: ${response.status} ${response.statusText}`);
+          return;
+        }
+
+        const updated = [...hsnCodes, newHsnCode];
+        setHsnCodes(updated);
+        setHsnCode(newHsnCode);
+        setNewHsnCode("");
+        console.log("✅ HSN code added successfully");
       } catch (error) {
-        console.error("Failed to add HSN code:", error);
+        console.error("❌ Failed to add HSN code:", error);
+        alert(`Error: ${error instanceof Error ? error.message : "Failed to add HSN code"}`);
       }
     }
   };
@@ -463,18 +548,35 @@ export default function ItemEdit() {
       !variationValues.includes(newVariationValue)
     ) {
       try {
-        const response = await fetch("/api/items/variation-values", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ value: newVariationValue }),
-        });
-        if (response.ok) {
-          const updated = [...variationValues, newVariationValue];
-          setVariationValues(updated);
-          setNewVariationValue("");
+        console.log(`🔄 Adding new variation value: "${newVariationValue}"`);
+
+        let response;
+        try {
+          response = await fetch("/api/items/variation-values", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ value: newVariationValue }),
+          });
+        } catch (fetchError) {
+          console.error("❌ Network error during fetch:", fetchError);
+          alert(`Network error: ${fetchError instanceof Error ? fetchError.message : "Failed to connect to server"}`);
+          return;
         }
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          console.error(`❌ Server error ${response.status}:`, errorText);
+          alert(`Error adding variation value: ${response.status} ${response.statusText}`);
+          return;
+        }
+
+        const updated = [...variationValues, newVariationValue];
+        setVariationValues(updated);
+        setNewVariationValue("");
+        console.log("✅ Variation value added successfully");
       } catch (error) {
-        console.error("Failed to add variation value:", error);
+        console.error("❌ Failed to add variation value:", error);
+        alert(`Error: ${error instanceof Error ? error.message : "Failed to add variation value"}`);
       }
     }
   };
