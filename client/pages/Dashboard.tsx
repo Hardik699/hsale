@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Package, Upload, CloudUpload } from "lucide-react";
+import { Package, Upload, CloudUpload, Loader2 } from "lucide-react";
 import UploadTab from "@/components/UploadTab";
+import { useUploadContext } from "@/hooks/UploadContext";
 
 const UPLOAD_TYPES = [
   { id: "petpooja", label: "Petpooja Upload", color: "bg-blue-600" },
@@ -9,9 +11,15 @@ const UPLOAD_TYPES = [
   { id: "website", label: "Website Upload", color: "bg-emerald-500" }
 ];
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
+  const { currentJob } = useUploadContext();
 
   const currentTab = UPLOAD_TYPES[activeTab];
 
@@ -30,7 +38,14 @@ export default function Dashboard() {
                   Data Upload
                 </h1>
                 <p className="text-gray-400 text-xs sm:text-sm font-medium mt-1">
-                  Upload and manage your data files
+                  {currentJob ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      📤 Uploading {currentJob.type} • {MONTHS[currentJob.month - 1]} {currentJob.year} • {currentJob.progress}%
+                    </span>
+                  ) : (
+                    "Upload and manage your data files"
+                  )}
                 </p>
               </div>
             </div>
@@ -44,6 +59,24 @@ export default function Dashboard() {
             <span className="relative">Items</span>
           </button>
         </div>
+
+        {/* Upload Progress Bar */}
+        {currentJob && (
+          <div className="px-6 sm:px-8 pb-4 sm:pb-6">
+            <div className="w-full bg-gray-800/50 rounded-full h-2 overflow-hidden border border-gray-700/50">
+              <div
+                className={`h-full transition-all duration-300 rounded-full ${
+                  currentJob.progress === 100
+                    ? 'bg-gradient-to-r from-green-500 to-emerald-500'
+                    : 'bg-gradient-to-r from-blue-500 to-cyan-500'
+                }`}
+                style={{
+                  width: `${currentJob.progress}%`
+                }}
+              ></div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Content */}

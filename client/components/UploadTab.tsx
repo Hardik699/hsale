@@ -6,6 +6,8 @@ import type { UploadType } from "@shared/formats";
 import UploadLoader from "./UploadLoader";
 import ConfirmUploadDialog from "./ConfirmUploadDialog";
 import DeleteDataDialog from "./DeleteDataDialog";
+import { useBackgroundUpload } from "@/hooks/useBackgroundUpload";
+import { useUploadContext } from "@/hooks/UploadContext";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -32,13 +34,11 @@ export default function UploadTab({ type }: UploadTabProps) {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [monthsStatus, setMonthsStatus] = useState<MonthStatus[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [message, setMessage] = useState<{ type: "success" | "error" | "warning"; text: string } | null>(null);
   const [fileData, setFileData] = useState<any>(null);
   const [showUploadForm, setShowUploadForm] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [isUpdatingExisting, setIsUpdatingExisting] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [selectedValidRowIndices, setSelectedValidRowIndices] = useState<number[]>([]);
@@ -46,6 +46,10 @@ export default function UploadTab({ type }: UploadTabProps) {
   const [deleteMonth, setDeleteMonth] = useState<number | null>(null);
   const [deleteYear, setDeleteYear] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Background upload hook and context
+  const { addUploadJob } = useBackgroundUpload();
+  const { currentJob } = useUploadContext();
 
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
@@ -228,7 +232,7 @@ export default function UploadTab({ type }: UploadTabProps) {
       console.log(`🔍 Starting chunked validation for ${dataRowCount} rows (1000 rows per chunk)`);
       setMessage({ type: "warning", text: `Validating ${dataRowCount.toLocaleString()} rows in chunks... This may take a moment.` });
 
-      // Chunked validation - validate 1000 rows at a time
+      // Chunked validation - validate 1000 rows at a time (smaller for validation stability)
       const CHUNK_SIZE = 1000;
       const totalChunks = Math.ceil(dataRowCount / CHUNK_SIZE);
       const allValidRows = [];
@@ -253,56 +257,79 @@ export default function UploadTab({ type }: UploadTabProps) {
           text: `Validating... Chunk ${chunkNum + 1}/${totalChunks} (${Math.round(((chunkNum + 1) / totalChunks) * 100)}% complete)`
         });
 
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds per chunk
+        // Validation with retry logic
+        let validationSuccess = false;
+        let validationRetries = 0;
+        const MAX_VALIDATION_RETRIES = 3;
 
-          const response = await fetch("/api/upload/validate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type,
-              data: minimalChunkData,
-              isMinimal: true,
-              originalIndices: { restaurantIdx, sapCodeIdx }
-            }),
-            signal: controller.signal
-          });
+        while (!validationSuccess && validationRetries < MAX_VALIDATION_RETRIES) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds per chunk
 
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            let errorText = `Chunk ${chunkNum + 1} validation failed`;
-            try {
-              const errorData = await response.json();
-              errorText = errorData.error || errorText;
-            } catch (e) {}
-            throw new Error(errorText);
-          }
-
-          const result = await response.json();
-          console.log(`✅ Chunk ${chunkNum + 1} validated: ${result.validCount} valid, ${result.invalidCount} invalid`);
-
-          totalValidCount += result.validCount;
-          totalInvalidCount += result.invalidCount;
-
-          // Collect invalid rows (map back to original row indices)
-          if (result.invalidRows && result.invalidRows.length > 0) {
-            result.invalidRows.forEach((row: any) => {
-              allInvalidRows.push({
-                ...row,
-                data: fullData[row.rowIndex - 1]
-              });
+            const response = await fetch("/api/upload/validate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type,
+                data: minimalChunkData,
+                isMinimal: true,
+                originalIndices: { restaurantIdx, sapCodeIdx }
+              }),
+              signal: controller.signal
             });
-          }
 
-          // Collect valid rows
-          if (result.validRows && result.validRows.length > 0) {
-            allValidRows.push(...result.validRows);
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              let errorText = `Chunk ${chunkNum + 1} validation failed`;
+              try {
+                const errorData = await response.json();
+                errorText = errorData.error || errorText;
+              } catch (e) {}
+              throw new Error(errorText);
+            }
+
+            const result = await response.json();
+            console.log(`✅ Chunk ${chunkNum + 1} validated: ${result.validCount} valid, ${result.invalidCount} invalid`);
+
+            totalValidCount += result.validCount;
+            totalInvalidCount += result.invalidCount;
+
+            // Collect invalid rows (map back to original row indices)
+            if (result.invalidRows && result.invalidRows.length > 0) {
+              result.invalidRows.forEach((row: any) => {
+                allInvalidRows.push({
+                  ...row,
+                  data: fullData[row.rowIndex - 1]
+                });
+              });
+            }
+
+            // Collect valid rows
+            if (result.validRows && result.validRows.length > 0) {
+              allValidRows.push(...result.validRows);
+            }
+
+            validationSuccess = true;
+
+          } catch (chunkError) {
+            validationRetries++;
+            const errorMsg = chunkError instanceof Error ? chunkError.message : String(chunkError);
+            console.error(`❌ Chunk ${chunkNum + 1} validation attempt ${validationRetries} failed:`, errorMsg);
+
+            if (validationRetries < MAX_VALIDATION_RETRIES) {
+              const waitMs = 2000 * validationRetries; // 2s, 4s wait between retries
+              console.log(`  Retrying validation in ${waitMs}ms...`);
+              setMessage({
+                type: "warning",
+                text: `Validation retry ${validationRetries}/${MAX_VALIDATION_RETRIES} for chunk ${chunkNum + 1}/${totalChunks}...`
+              });
+              await new Promise(resolve => setTimeout(resolve, waitMs));
+            } else {
+              throw new Error(`Chunk ${chunkNum + 1} validation failed after ${MAX_VALIDATION_RETRIES} attempts: ${errorMsg}`);
+            }
           }
-        } catch (chunkError) {
-          console.error(`❌ Chunk ${chunkNum + 1} validation error:`, chunkError);
-          throw chunkError;
         }
       }
 
@@ -345,7 +372,8 @@ export default function UploadTab({ type }: UploadTabProps) {
     isUpdate: boolean = false
   ): Promise<boolean> => {
     const totalRows = uploadBody.rows;
-    const CHUNK_SIZE = 1000; // 1000 rows per chunk
+    const CHUNK_SIZE = 10000; // 10000 rows per chunk
+    const DELAY_BETWEEN_CHUNKS = 20000; // 20 seconds delay between chunks
     const data = uploadBody.data as any[];
     const headers = data[0];
     const dataRows = data.slice(1);
@@ -383,13 +411,13 @@ export default function UploadTab({ type }: UploadTabProps) {
 
         // Upload single chunk with retry logic
         let retryCount = 0;
-        const MAX_RETRIES = 3;
+        const MAX_RETRIES = 5; // Increased from 3 to 5 for better reliability
         let chunkSuccess = false;
 
         while (retryCount < MAX_RETRIES && !chunkSuccess) {
           try {
             const controller = new AbortController();
-            const timeoutMs = 120000; // 2 minutes per chunk (sequential = slower but stable)
+            const timeoutMs = 180000; // 3 minutes per chunk for larger data
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             const method = isUpdate && chunkIndex === 0 ? "PUT" : "POST";
@@ -423,19 +451,37 @@ export default function UploadTab({ type }: UploadTabProps) {
             const progress = Math.round(((chunkIndex + 1) / numChunks) * 100);
             setUploadProgress(progress);
 
+            // Add 20-second delay before next chunk (except for last chunk)
+            if (chunkIndex < numChunks - 1) {
+              console.log(`⏳ Waiting ${DELAY_BETWEEN_CHUNKS / 1000}s before next chunk...`);
+              setMessage({
+                type: "warning",
+                text: `Chunk uploaded. Waiting ${DELAY_BETWEEN_CHUNKS / 1000}s before next chunk...`
+              });
+              await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS));
+            }
+
           } catch (error) {
             retryCount++;
             const errorMsg = error instanceof Error ? error.message : String(error);
             console.error(`❌ Chunk ${chunkIndex + 1} attempt ${retryCount} failed:`, errorMsg);
 
             if (retryCount < MAX_RETRIES) {
-              const waitMs = 2000 * retryCount; // 2s, 4s, 6s wait between retries
+              const waitMs = 3000 * retryCount; // 3s, 6s, 9s, 12s, 15s wait between retries
               console.log(`  Retrying in ${waitMs}ms...`);
+              setMessage({
+                type: "warning",
+                text: `Chunk failed. Retrying in ${waitMs / 1000}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`
+              });
               await new Promise(resolve => setTimeout(resolve, waitMs));
             } else {
               throw new Error(`Chunk ${chunkIndex + 1} failed after ${MAX_RETRIES} attempts: ${errorMsg}`);
             }
           }
+        }
+
+        if (!chunkSuccess) {
+          throw new Error(`Chunk ${chunkIndex + 1} failed - all retry attempts exhausted`);
         }
       }
 
@@ -446,342 +492,91 @@ export default function UploadTab({ type }: UploadTabProps) {
     }
   };
 
-  const handleUpload = async () => {
+  const handleUpload = () => {
     if (!selectedYear || !selectedMonth || !fileData) {
       setMessage({ type: "error", text: "Please select year, month and upload a file" });
       return;
     }
 
-    setIsLoading(true);
-    setUploadProgress(0);
-    setMessage({ type: "warning", text: `Uploading ${fileData.rows} rows... Please wait.` });
+    console.log("🚀 Queueing upload for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
-    try {
-      const startTime = Date.now();
-      console.log("🚀 Starting optimized upload for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
+    // Add upload job to queue
+    addUploadJob(
+      type,
+      selectedYear,
+      selectedMonth,
+      fileData.data,
+      selectedValidRowIndices.length > 0 ? selectedValidRowIndices : undefined,
+      false // Not an update
+    );
 
-      // Prepare upload body
-      const uploadBody: any = {
-        type,
-        year: selectedYear,
-        month: selectedMonth,
-        rows: fileData.rows,
-        columns: fileData.columns,
-        data: fileData.data
-      };
+    // Clear form
+    setFileData(null);
+    setSelectedMonth(null);
+    setShowUploadForm(false);
+    setMessage(null);
+    setValidationResult(null);
+    setSelectedValidRowIndices([]);
 
-      // If there are invalid rows, pass the valid row indices
-      if (validationResult && selectedValidRowIndices.length > 0) {
-        uploadBody.validRowIndices = selectedValidRowIndices;
-      }
-
-      // Use chunked upload for files >5000 rows, single request for small files
-      // Chunked approach is more reliable for all larger files
-      let result;
-      if (fileData.rows > 5000) {
-        console.log("🔼 All chunks uploaded successfully, finalizing...");
-
-        // Wait a moment before finalizing to let server process chunks
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Finalize with retry logic
-        let finalizeSuccess = false;
-        let finalizeRetries = 0;
-        const MAX_FINALIZE_RETRIES = 3;
-
-        while (!finalizeSuccess && finalizeRetries < MAX_FINALIZE_RETRIES) {
-          try {
-            console.log(`🔄 Finalize attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES}`);
-            setMessage({
-              type: "warning",
-              text: `Finalizing upload (attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES})...`
-            });
-
-            const finalizeController = new AbortController();
-            const finalizeTimeoutId = setTimeout(() => finalizeController.abort(), 60000); // 60 seconds
-
-            const finalizeResponse = await fetch("/api/upload/finalize", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                type,
-                year: selectedYear,
-                month: selectedMonth
-              }),
-              signal: finalizeController.signal
-            });
-
-            clearTimeout(finalizeTimeoutId);
-
-            if (!finalizeResponse.ok) {
-              let errorText = "Failed to finalize upload";
-              try {
-                const errorData = await finalizeResponse.json();
-                errorText = errorData.error || errorText;
-              } catch (e) {}
-              throw new Error(errorText);
-            }
-
-            result = await finalizeResponse.json();
-            finalizeSuccess = true;
-            console.log("✅ Upload finalized successfully:", result);
-
-          } catch (finalizeError) {
-            finalizeRetries++;
-            const errorMsg = finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
-            console.error(`❌ Finalize attempt ${finalizeRetries} failed:`, errorMsg);
-
-            if (finalizeRetries < MAX_FINALIZE_RETRIES) {
-              const waitMs = 3000 * finalizeRetries; // 3s, 6s, 9s wait
-              console.log(`  Retrying in ${waitMs}ms...`);
-              await new Promise(resolve => setTimeout(resolve, waitMs));
-            } else {
-              throw new Error(`Upload finalization failed after ${MAX_FINALIZE_RETRIES} attempts: ${errorMsg}`);
-            }
-          }
-        }
-      } else {
-        // Small file - use single request
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
-
-        const response = await fetch("/api/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(uploadBody),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok && response.status !== 409) {
-          throw new Error(`Upload failed with status ${response.status}`);
-        }
-
-        result = await response.json();
-
-        if (response.status === 409) {
-          setIsLoading(false);
-          setShowConfirmDialog(true);
-          setMessage(null);
-          return;
-        }
-      }
-
-      const elapsedMs = Date.now() - startTime;
-      const speedRowsPerSec = Math.round((fileData.rows / elapsedMs) * 1000);
-
-      setUploadProgress(100);
-      setMessage({
-        type: "success",
-        text: `✅ Uploaded ${fileData.rows.toLocaleString()} rows in ${(elapsedMs / 1000).toFixed(1)}s (${speedRowsPerSec} rows/sec)`
-      });
-
-      setFileData(null);
-      setSelectedMonth(null);
-      setShowUploadForm(false);
-      setIsLoading(false);
-
-      // Fetch updated status to refresh table immediately
+    // Refresh status after a moment
+    setTimeout(() => {
       try {
-        const statusResponse = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`);
-        if (statusResponse.ok) {
-          const data = await statusResponse.json();
-          if (data.data) {
-            setMonthsStatus(data.data);
-          }
-        }
-      } catch (statusError) {
-        console.error("Failed to refresh status:", statusError);
+        fetch(`/api/uploads?type=${type}&year=${selectedYear}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.data) {
+              setMonthsStatus(data.data);
+            }
+          })
+          .catch(err => console.error("Failed to refresh status:", err));
+      } catch (e) {
+        console.error("Failed to refresh status:", e);
       }
-    } catch (error) {
-      console.error("Upload error:", error);
-      setIsLoading(false);
-
-      if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
-        setMessage({
-          type: "error",
-          text: "Cannot connect to server. Please check your internet connection and try again."
-        });
-      } else if (error instanceof Error && error.name === "AbortError") {
-        setMessage({
-          type: "error",
-          text: "Upload chunk timed out. Please try again or use a smaller file."
-        });
-      } else {
-        const errorMsg = error instanceof Error ? error.message : "Unknown error";
-        setMessage({
-          type: "error",
-          text: `Upload failed: ${errorMsg}`
-        });
-      }
-    }
+    }, 1000);
   };
 
-  const handleConfirmUpdate = async () => {
+  const handleConfirmUpdate = () => {
     if (!selectedYear || !selectedMonth || !fileData) {
       setMessage({ type: "error", text: "Please select year, month and upload a file" });
       return;
     }
 
-    setIsUpdatingExisting(true);
-    setUploadProgress(0);
-    setMessage({ type: "warning", text: `Updating ${fileData.rows} rows... Please wait.` });
+    console.log("🔄 Queueing update for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
 
-    try {
-      const startTime = Date.now();
-      console.log("🔄 Starting optimized update for", type, selectedYear, selectedMonth, "with", fileData.rows, "rows");
+    // Add update job to queue
+    addUploadJob(
+      type,
+      selectedYear,
+      selectedMonth,
+      fileData.data,
+      selectedValidRowIndices.length > 0 ? selectedValidRowIndices : undefined,
+      true // Is an update
+    );
 
-      // Prepare update body
-      const updateBody: any = {
-        type,
-        year: selectedYear,
-        month: selectedMonth,
-        rows: fileData.rows,
-        columns: fileData.columns,
-        data: fileData.data
-      };
+    // Clear form
+    setShowConfirmDialog(false);
+    setFileData(null);
+    setSelectedMonth(null);
+    setShowUploadForm(false);
+    setMessage(null);
+    setValidationResult(null);
+    setSelectedValidRowIndices([]);
 
-      // If there are invalid rows, pass the valid row indices
-      if (validationResult && selectedValidRowIndices.length > 0) {
-        updateBody.validRowIndices = selectedValidRowIndices;
-      }
-
-      // Use chunked upload for files >5000 rows, single request for small files
-      let result;
-      if (fileData.rows > 5000) {
-        console.log("🔼 All update chunks uploaded successfully, finalizing...");
-
-        // Wait a moment before finalizing to let server process chunks
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Finalize with retry logic
-        let finalizeSuccess = false;
-        let finalizeRetries = 0;
-        const MAX_FINALIZE_RETRIES = 3;
-
-        while (!finalizeSuccess && finalizeRetries < MAX_FINALIZE_RETRIES) {
-          try {
-            console.log(`🔄 Update finalize attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES}`);
-            setMessage({
-              type: "warning",
-              text: `Finalizing update (attempt ${finalizeRetries + 1}/${MAX_FINALIZE_RETRIES})...`
-            });
-
-            const finalizeController = new AbortController();
-            const finalizeTimeoutId = setTimeout(() => finalizeController.abort(), 60000); // 60 seconds
-
-            const finalizeResponse = await fetch("/api/upload/finalize", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                type,
-                year: selectedYear,
-                month: selectedMonth,
-                isUpdate: true
-              }),
-              signal: finalizeController.signal
-            });
-
-            clearTimeout(finalizeTimeoutId);
-
-            if (!finalizeResponse.ok) {
-              let errorText = "Failed to finalize update";
-              try {
-                const errorData = await finalizeResponse.json();
-                errorText = errorData.error || errorText;
-              } catch (e) {}
-              throw new Error(errorText);
-            }
-
-            result = await finalizeResponse.json();
-            finalizeSuccess = true;
-            console.log("✅ Update finalized successfully:", result);
-
-          } catch (finalizeError) {
-            finalizeRetries++;
-            const errorMsg = finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
-            console.error(`❌ Update finalize attempt ${finalizeRetries} failed:`, errorMsg);
-
-            if (finalizeRetries < MAX_FINALIZE_RETRIES) {
-              const waitMs = 3000 * finalizeRetries; // 3s, 6s, 9s wait
-              console.log(`  Retrying in ${waitMs}ms...`);
-              await new Promise(resolve => setTimeout(resolve, waitMs));
-            } else {
-              throw new Error(`Update finalization failed after ${MAX_FINALIZE_RETRIES} attempts: ${errorMsg}`);
-            }
-          }
-        }
-      } else {
-        // Small file - use single request
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
-
-        const response = await fetch("/api/upload", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updateBody),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          throw new Error(`Update failed with status ${response.status}`);
-        }
-        result = await response.json();
-      }
-
-      const elapsedMs = Date.now() - startTime;
-      const speedRowsPerSec = Math.round((fileData.rows / elapsedMs) * 1000);
-
-      setUploadProgress(100);
-      setShowConfirmDialog(false);
-      setMessage({
-        type: "success",
-        text: `✅ Updated ${fileData.rows.toLocaleString()} rows in ${(elapsedMs / 1000).toFixed(1)}s (${speedRowsPerSec} rows/sec)`
-      });
-
-      setFileData(null);
-      setSelectedMonth(null);
-      setShowUploadForm(false);
-      setIsUpdatingExisting(false);
-
-      // Fetch updated status to refresh table immediately
+    // Refresh status after a moment
+    setTimeout(() => {
       try {
-        const statusResponse = await fetch(`/api/uploads?type=${type}&year=${selectedYear}`);
-        if (statusResponse.ok) {
-          const data = await statusResponse.json();
-          if (data.data) {
-            setMonthsStatus(data.data);
-          }
-        }
-      } catch (statusError) {
-        console.error("Failed to refresh status:", statusError);
+        fetch(`/api/uploads?type=${type}&year=${selectedYear}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.data) {
+              setMonthsStatus(data.data);
+            }
+          })
+          .catch(err => console.error("Failed to refresh status:", err));
+      } catch (e) {
+        console.error("Failed to refresh status:", e);
       }
-    } catch (error) {
-      console.error("Update error:", error);
-      setShowConfirmDialog(false);
-      setIsUpdatingExisting(false);
-
-      if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
-        setMessage({
-          type: "error",
-          text: "Cannot connect to server. Please check your internet connection and try again."
-        });
-      } else if (error instanceof Error && error.name === "AbortError") {
-        setMessage({
-          type: "error",
-          text: "Update chunk timed out. Please try again or use a smaller file."
-        });
-      } else {
-        const errorMsg = error instanceof Error ? error.message : "Unknown error";
-        setMessage({
-          type: "error",
-          text: `Update failed: ${errorMsg}`
-        });
-      }
-    }
+    }, 1000);
   };
 
   const getMonthStatus = (monthNum: number) => {
@@ -891,7 +686,11 @@ export default function UploadTab({ type }: UploadTabProps) {
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* Upload Loader Animation */}
-      <UploadLoader isVisible={isLoading || isUpdatingExisting} progress={uploadProgress} />
+      <UploadLoader
+        isVisible={currentJob !== null}
+        progress={currentJob?.progress || 0}
+        job={currentJob}
+      />
 
       {/* Confirm Update Dialog */}
       <ConfirmUploadDialog
@@ -901,9 +700,8 @@ export default function UploadTab({ type }: UploadTabProps) {
         onConfirm={handleConfirmUpdate}
         onCancel={() => {
           setShowConfirmDialog(false);
-          setIsUpdatingExisting(false);
         }}
-        isLoading={isUpdatingExisting}
+        isLoading={currentJob !== null}
       />
 
       {/* Delete Data Dialog */}
@@ -1084,15 +882,15 @@ export default function UploadTab({ type }: UploadTabProps) {
           {/* Upload Button */}
           <button
             onClick={handleUpload}
-            disabled={isLoading || !fileData || !selectedMonth}
+            disabled={currentJob !== null || !fileData || !selectedMonth}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2.5 sm:py-3 rounded-lg font-semibold text-sm shadow-lg shadow-blue-600/50 hover:shadow-xl hover:shadow-blue-500/80 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 relative overflow-hidden group tracking-wide"
           >
             <div className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
             <div className="relative flex items-center justify-center gap-1.5">
-              {isLoading ? (
+              {currentJob ? (
                 <>
                   <span className="inline-block animate-spin">⏳</span>
-                  <span>UPLOADING...</span>
+                  <span>UPLOADING IN BACKGROUND...</span>
                 </>
               ) : (
                 <>
