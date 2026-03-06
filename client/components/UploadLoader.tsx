@@ -1,15 +1,30 @@
 import { Upload } from "lucide-react";
 
+interface UploadJob {
+  id: string;
+  type: string;
+  year: number;
+  month: number;
+  progress: number;
+  status: 'pending' | 'uploading' | 'completed' | 'failed';
+}
+
 interface UploadLoaderProps {
   isVisible: boolean;
   progress?: number; // 0-100
+  job?: UploadJob | null;
 }
 
-export default function UploadLoader({ isVisible, progress = 0 }: UploadLoaderProps) {
+export default function UploadLoader({ isVisible, progress = 0, job }: UploadLoaderProps) {
   if (!isVisible) return null;
 
   // Ensure progress is between 0 and 100
   const normalizedProgress = Math.min(Math.max(progress, 0), 100);
+
+  const MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50">
@@ -32,10 +47,19 @@ export default function UploadLoader({ isVisible, progress = 0 }: UploadLoaderPr
 
         {/* Text */}
         <h3 className="text-xl font-bold text-gray-900 text-center mb-2">
-          Uploading Data
+          {normalizedProgress === 100 ? "Upload Complete!" : "Uploading in Background"}
         </h3>
         <p className="text-gray-600 text-center mb-6 text-sm">
-          Please wait while your file is being processed...
+          {job ? (
+            <>
+              {job.type} • {MONTHS[job.month - 1]} {job.year}<br />
+              <span className="text-xs text-gray-500 mt-1 block">
+                {normalizedProgress === 100 ? "✅ Upload successful!" : "Processing your data..."}
+              </span>
+            </>
+          ) : (
+            "Processing your data..."
+          )}
         </p>
 
         {/* Progress Bar with Percentage */}
