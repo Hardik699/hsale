@@ -981,7 +981,7 @@ export const handleFinalizeUpload: RequestHandler = async (req, res) => {
       // we need to filter them based on the indices
       const validIndices = new Set(metadata.validRowIndices);
       const filteredRows = combinedDataRows.filter((_, idx) => validIndices.has(idx + 2)); // +2 because row 0 is header, row 1 is first data row
-      finalData = [[], ...filteredRows];
+      finalData = [headers, ...filteredRows];
       totalRows = filteredRows.length;
     }
 
