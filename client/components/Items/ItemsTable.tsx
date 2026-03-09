@@ -228,10 +228,10 @@ export default function ItemsTable({ items, onDelete, onSelectedChange }: ItemsT
                   {/* Prices */}
                   {uniqueVariationValues.map((v) => (
                     <React.Fragment key={`${item.itemId}-${v}-prices`}>
-                      <td className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Dining")}</td>
-                      <td className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Parcal")}</td>
-                      <td className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Swiggy")}</td>
-                      <td className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Zomato")}</td>
+                      <td key={`${item.itemId}-${v}-dining`} className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Dining")}</td>
+                      <td key={`${item.itemId}-${v}-parcal`} className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Parcal")}</td>
+                      <td key={`${item.itemId}-${v}-swiggy`} className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Swiggy")}</td>
+                      <td key={`${item.itemId}-${v}-zomato`} className="px-2 py-3 text-center font-bold text-gray-100 mx-0.5 rounded border border-slate-600/30 bg-slate-700/20 text-xs" style={{ fontFamily: "Poppins, sans-serif" }}>{getPrice(item, v, "Zomato")}</td>
                     </React.Fragment>
                   ))}
                 </tr>

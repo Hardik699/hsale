@@ -212,15 +212,74 @@ export default function Items() {
     migrateGS1();
   }, []);
 
-  const handleDownload = () => {
-    // Export items as CSV/Excel
-    const csv = convertToCSV(items);
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "items.csv";
-    a.click();
+  const handleDownload = async () => {
+    try {
+      // Import XLSX dynamically
+      const XLSX = await import("xlsx");
+
+      // Flatten items data for export
+      const exportData = items.flatMap((item) => {
+        if (!item.variations || item.variations.length === 0) {
+          // If no variations, export item with empty variation row
+          return [{
+            "Item ID": item.itemId,
+            "Item Name": item.itemName,
+            "Group": item.group,
+            "Category": item.category,
+            "Short Code": item.shortCode || "",
+            "Description": item.description || "",
+            "HSN Code": item.hsnCode || "",
+            "Unit Type": item.unitType,
+            "Sale Type": item.saleType || "QTY",
+            "Profit Margin": item.profitMargin || 0,
+            "GST": item.gst || 0,
+            "Item Type": item.itemType,
+            "Variation Name": "",
+            "Variation Value": "",
+            "Base Price": "",
+            "SAP Code": "",
+          }];
+        }
+
+        // Create a row for each variation
+        return item.variations.map((v: any) => ({
+          "Item ID": item.itemId,
+          "Item Name": item.itemName,
+          "Group": item.group,
+          "Category": item.category,
+          "Short Code": item.shortCode || "",
+          "Description": item.description || "",
+          "HSN Code": item.hsnCode || "",
+          "Unit Type": item.unitType,
+          "Sale Type": v.saleType || item.saleType || "QTY",
+          "Profit Margin": v.profitMargin || item.profitMargin || 0,
+          "GST": item.gst || 0,
+          "Item Type": item.itemType,
+          "Variation Name": v.name,
+          "Variation Value": v.value,
+          "Base Price": v.price || "",
+          "SAP Code": v.sapCode || "",
+        }));
+      });
+
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet(exportData);
+
+      // Set column widths
+      const colWidths = [18, 20, 12, 15, 12, 20, 10, 14, 10, 12, 8, 10, 14, 14, 11, 10];
+      ws["!cols"] = colWidths.map((w) => ({ wch: w }));
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Items");
+
+      // Write file
+      XLSX.writeFile(wb, `items-export-${new Date().toISOString().split("T")[0]}.xlsx`);
+      console.log("✅ Items exported to Excel successfully");
+    } catch (error: any) {
+      console.error("Error exporting to Excel:", error);
+      alert(`Failed to export items: ${error.message || "Unknown error occurred"}`);
+    }
   };
 
   const downloadTemplateWithDropdowns = async () => {
