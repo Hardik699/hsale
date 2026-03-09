@@ -8,6 +8,7 @@ interface ExcelImportDialogProps {
 }
 
 interface ParsedItem {
+  itemId?: string; // Optional - if provided, item will be updated
   itemName: string;
   group: string;
   category: string;
@@ -47,6 +48,7 @@ export default function ExcelImportDialog({
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<"upload" | "preview" | "confirm">("upload");
   const [importedCount, setImportedCount] = useState(0);
+  const [updatedCount, setUpdatedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -83,7 +85,7 @@ export default function ExcelImportDialog({
 
       if (missingColumns.length > 0) {
         setError(
-          `Missing required columns: ${missingColumns.join(", ")}\n\nRequired: ${requiredColumns.join(", ")}\n\nOptional: Item ID, Short Code (will be auto-generated if not provided)`
+          `Missing required columns: ${missingColumns.join(", ")}\n\nRequired: ${requiredColumns.join(", ")}\n\nOptional: Item ID (to update existing items), Short Code (will be auto-generated if not provided)`
         );
         return;
       }
@@ -105,12 +107,15 @@ export default function ExcelImportDialog({
       const itemName = row["Item Name"]?.toString().trim();
       const group = row["Group"]?.toString().trim();
       const category = row["Category"]?.toString().trim();
+      const itemId = row["Item ID"]?.toString().trim(); // Optional, for updates
 
       if (!itemName || !group || !category) return;
 
-      const key = itemName;
+      // Use Item ID as key if provided, otherwise use Item Name
+      const key = itemId || itemName;
       if (!itemsMap.has(key)) {
         itemsMap.set(key, {
+          itemId: itemId, // Include itemId if provided
           itemName,
           group,
           category,
@@ -233,17 +238,26 @@ export default function ExcelImportDialog({
       }
 
       const createdItems: any[] = [];
+      const updatedItems: any[] = [];
       let successCount = 0;
       let failCount = 0;
       let skipped = 0;
+      let updatedCount = 0;
 
-      // Create items one by one
+      // Create or update items one by one
       for (let index = 0; index < parsedItems.length; index++) {
         try {
           const item = parsedItems[index];
 
-          // Check if item already exists
-          const itemExists = existingItems.some((ei) => ei.itemName === item.itemName);
+          // Check if item should be updated (has itemId) or created
+          let existingItem = null;
+          if (item.itemId) {
+            existingItem = existingItems.find((ei) => ei.itemId === item.itemId);
+          } else {
+            existingItem = existingItems.find((ei) => ei.itemName === item.itemName);
+          }
+
+          const itemExists = !!existingItem;
           const existingVariations = existingVariationsMap.get(item.itemName) || new Set();
 
           // Filter out variations that already exist in the database
@@ -269,15 +283,11 @@ export default function ExcelImportDialog({
             continue;
           }
 
-          // If item exists but has new variations, we need to fetch and update it
-          if (itemExists && newVariations.length > 0) {
+          // If item exists, update it (full update if itemId provided, or add variations)
+          if (itemExists && existingItem) {
             console.log(
-              `📝 Adding new variations to existing item "${item.itemName}"`
+              `📝 ${item.itemId ? "Updating existing" : "Adding variations to existing"} item "${item.itemName}"`
             );
-
-            // Get the existing item to get its itemId
-            const existingItem = existingItems.find((ei) => ei.itemName === item.itemName);
-            if (!existingItem) continue;
 
             // Create variations for the new ones only
             const variationsToAdd = newVariations.map((v, vIdx) => {
@@ -302,23 +312,46 @@ export default function ExcelImportDialog({
               };
             });
 
-            // Update the existing item with new variations
+            // If itemId is provided, do a full update. Otherwise, just add variations
+            const updatePayload = item.itemId
+              ? {
+                  // Full item update
+                  itemName: item.itemName,
+                  group: item.group,
+                  category: item.category,
+                  shortCode: item.shortCode || existingItem.shortCode || "",
+                  description: item.description || existingItem.description || "",
+                  hsnCode: item.hsnCode || existingItem.hsnCode || "",
+                  unitType: item.unitType || existingItem.unitType,
+                  saleType: item.saleType || existingItem.saleType,
+                  profitMargin: item.profitMargin || existingItem.profitMargin || 0,
+                  gst: item.gst || existingItem.gst || 0,
+                  itemType: item.itemType || existingItem.itemType,
+                  variations: [...(existingItem.variations || []), ...variationsToAdd],
+                }
+              : {
+                  // Just update variations
+                  variations: [...(existingItem.variations || []), ...variationsToAdd],
+                };
+
+            // Update the existing item
             try {
               const updateResponse = await fetch(`/api/items/${existingItem.itemId}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  variations: [...(existingItem.variations || []), ...variationsToAdd],
-                }),
+                body: JSON.stringify(updatePayload),
               });
 
               if (updateResponse.ok) {
-                createdItems.push({ ...existingItem, variations: [...(existingItem.variations || []), ...variationsToAdd] });
+                const updatedItem = await updateResponse.json();
+                updatedItems.push(updatedItem);
+                updatedCount++;
                 successCount++;
+                console.log(`✅ Updated item ${existingItem.itemId}`);
               } else {
                 failCount++;
                 console.error(
-                  `Failed to add variations to ${item.itemName}: ${updateResponse.status} ${updateResponse.statusText}`
+                  `Failed to update ${item.itemName}: ${updateResponse.status} ${updateResponse.statusText}`
                 );
               }
             } catch (err) {
@@ -420,17 +453,19 @@ export default function ExcelImportDialog({
         }
       }
 
-      setImportedCount(successCount);
+      setImportedCount(successCount - updatedCount); // Only count new items
+      setUpdatedCount(updatedCount);
       setSkippedCount(skipped);
       setStep("confirm");
 
       if (successCount > 0) {
         setTimeout(() => {
-          onSuccess(createdItems);
+          // Return both created and updated items
+          onSuccess([...createdItems, ...updatedItems]);
           onClose();
         }, 1500);
       } else if (failCount > 0) {
-        setError(`Failed to create ${failCount} items. Please check your data.`);
+        setError(`Failed to import ${failCount} items. Please check your data.`);
         setStep("preview");
       }
     } catch (err) {
@@ -623,6 +658,7 @@ export default function ExcelImportDialog({
                   <div>
                     <p className="text-gray-300 font-medium mb-1">Optional Columns:</p>
                     <ul className="space-y-1">
+                      <li>- Item ID (for updates)</li>
                       <li>- Short Code</li>
                       <li>- Description</li>
                       <li>- HSN Code</li>
@@ -639,7 +675,7 @@ export default function ExcelImportDialog({
               {/* Smart Features */}
               <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
                 <p className="text-green-300 text-xs">
-                  ✨ <strong>Smart Features:</strong> Duplicate variations (250Gms = 250GMS = 250 GMS) are automatically detected and skipped. Existing items are updated with new variations.
+                  ✨ <strong>Smart Features:</strong> Duplicate variations (250Gms = 250GMS = 250 GMS) are automatically detected and skipped. Include Item ID to update existing items with full data changes, or just add new variations to them.
                 </p>
               </div>
 
@@ -757,9 +793,16 @@ export default function ExcelImportDialog({
                 <p className="text-2xl font-bold text-white mb-2">
                   Import Complete!
                 </p>
-                <p className="text-gray-300">
-                  {importedCount} item{importedCount !== 1 ? "s" : ""} created successfully
-                </p>
+                {importedCount > 0 && (
+                  <p className="text-gray-300">
+                    ✨ {importedCount} new item{importedCount !== 1 ? "s" : ""} created successfully
+                  </p>
+                )}
+                {updatedCount > 0 && (
+                  <p className="text-gray-300">
+                    📝 {updatedCount} existing item{updatedCount !== 1 ? "s" : ""} updated successfully
+                  </p>
+                )}
                 {skippedCount > 0 && (
                   <p className="text-gray-400 text-sm mt-2">
                     ⏭️ {skippedCount} variation{skippedCount !== 1 ? "s" : ""} skipped (already exist in database)
