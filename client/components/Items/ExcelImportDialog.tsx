@@ -460,8 +460,10 @@ export default function ExcelImportDialog({
 
       if (successCount > 0) {
         setTimeout(() => {
-          // Return both created and updated items
-          onSuccess([...createdItems, ...updatedItems]);
+          // Return both created and updated items, filtered to ensure they have itemId
+          const validItems = [...createdItems, ...updatedItems].filter(item => item && item.itemId);
+          console.log(`📦 Returning ${validItems.length} valid items to component`);
+          onSuccess(validItems);
           onClose();
         }, 1500);
       } else if (failCount > 0) {
